@@ -6,7 +6,7 @@ DB_CONFIG = {
     "user": "sandy",
     "password": "sandy123",
     "host": "localhost",
-    "port": "5432"
+    "port": "5433"
 }
 
 
@@ -105,7 +105,7 @@ def create_tables(conn):
         """)
 
     conn.commit()
-    print("✅ All tables created successfully.")
+    print("OK: All tables created successfully.")
 
 
 def main():
@@ -114,7 +114,7 @@ def main():
         create_tables(conn)
         conn.close()
     except Exception as e:
-        print("❌ Error:", e)
+        print("Error:", e)
 
 
 if __name__ == "__main__":
