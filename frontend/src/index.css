@@ -1,0 +1,188 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------- Base / typography ---------- */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: "Nunito", "Poppins", "Comic Neue", system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #03385a;
+  background: #cdeeff;
+}
+
+.dark body {
+  color: #e5f1ff;
+  background: #03132a;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.font-display,
+.font-heading {
+  letter-spacing: 0.5px;
+}
+
+/* ---------- Scrollbars ---------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(10, 143, 216, 0.35);
+  border-radius: 999px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(95, 197, 255, 0.35);
+}
+
+/* ---------- Reusable component classes ---------- */
+@layer components {
+  .glass-card {
+    @apply rounded-3xl border border-white/60 bg-white/70 backdrop-blur-xl shadow-soft
+           dark:border-white/10 dark:bg-white/5;
+  }
+
+  .glass-pill {
+    @apply rounded-full border border-white/60 bg-white/70 backdrop-blur px-3 py-1.5
+           dark:border-white/10 dark:bg-white/5;
+  }
+
+  .pineapple-card {
+    @apply relative overflow-hidden rounded-[28px] border border-sand-300/70
+           bg-gradient-to-br from-sand-200 via-sand-300 to-sand-400
+           text-ocean-900 shadow-sun transition-transform duration-300
+           hover:-translate-y-1 hover:shadow-bubble
+           dark:border-sand-500/30 dark:from-night-700 dark:via-night-800 dark:to-night-900 dark:text-sand-100;
+  }
+
+  .coral-card {
+    @apply relative overflow-hidden rounded-[28px] border border-coral-200/70
+           bg-gradient-to-br from-coral-100 via-coral-200 to-coral-300
+           text-ocean-900 shadow-coral transition-transform duration-300
+           hover:-translate-y-1 hover:shadow-bubble
+           dark:border-coral-400/20 dark:from-night-700 dark:via-night-800 dark:to-night-900 dark:text-coral-100;
+  }
+
+  .ocean-card {
+    @apply relative overflow-hidden rounded-[28px] border border-ocean-200/70
+           bg-gradient-to-br from-ocean-100 via-ocean-200 to-ocean-300
+           text-ocean-900 shadow-bubble transition-transform duration-300
+           hover:-translate-y-1 hover:shadow-coral
+           dark:border-ocean-400/20 dark:from-night-700 dark:via-night-800 dark:to-night-900 dark:text-ocean-100;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-sand-500
+           px-5 py-2.5 font-heading text-lg text-ocean-900 shadow-sun
+           transition-transform duration-200 hover:-translate-y-0.5 hover:scale-[1.02]
+           active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full
+           border border-white/60 bg-white/60 px-4 py-2 font-semibold
+           text-ocean-800 shadow-soft backdrop-blur transition hover:bg-white
+           dark:border-white/10 dark:bg-white/5 dark:text-ocean-100 dark:hover:bg-white/10;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide;
+  }
+
+  .input {
+    @apply w-full rounded-2xl border border-white/60 bg-white/80 px-4 py-2.5 text-sm font-semibold
+           text-ocean-900 shadow-soft outline-none transition
+           placeholder:text-ocean-400
+           focus:border-ocean-300 focus:ring-2 focus:ring-ocean-200
+           dark:border-white/10 dark:bg-white/10 dark:text-ocean-50 dark:placeholder:text-ocean-300/60
+           dark:focus:ring-ocean-700;
+  }
+}
+
+/* ---------- Underwater background ---------- */
+.bb-app-bg {
+  position: relative;
+  min-height: 100%;
+  background: linear-gradient(180deg, #eaf8ff 0%, #cdeeff 35%, #9bdcff 100%);
+  overflow: hidden;
+}
+
+.dark .bb-app-bg {
+  background: linear-gradient(180deg, #03132a 0%, #061e44 55%, #0a2d63 100%);
+}
+
+/* Sun beams from the surface */
+.bb-app-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% -10%, rgba(255, 240, 170, 0.7), rgba(255, 240, 170, 0) 55%),
+    radial-gradient(ellipse at 75% -5%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dark .bb-app-bg::before {
+  background:
+    radial-gradient(ellipse at 20% -10%, rgba(95, 197, 255, 0.25), rgba(95, 197, 255, 0) 55%),
+    radial-gradient(ellipse at 80% -5%, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 50%);
+}
+
+/* Sandy sea floor */
+.bb-app-bg::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 110px;
+  background: radial-gradient(
+      ellipse at 50% 0%,
+      rgba(255, 207, 31, 0.45) 0%,
+      rgba(255, 207, 31, 0) 70%
+    ),
+    linear-gradient(180deg, rgba(255, 222, 63, 0.7), rgba(245, 179, 1, 0.95));
+  filter: blur(1px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dark .bb-app-bg::after {
+  background: linear-gradient(
+    180deg,
+    rgba(16, 62, 133, 0.5),
+    rgba(3, 19, 42, 0.95)
+  );
+}
+
+/* Everything above background layers */
+.bb-main-stack {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- Utility animations ---------- */
+.text-stroke-dark {
+  -webkit-text-stroke: 1.25px #03385a;
+  text-stroke: 1.25px #03385a;
+}
+.dark .text-stroke-dark {
+  -webkit-text-stroke: 1.25px #03132a;
+}
