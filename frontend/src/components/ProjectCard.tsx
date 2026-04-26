@@ -47,10 +47,12 @@ function emojiFromName(name: string): string {
 
 export default function ProjectCard({
   project,
+  onView,
   onEdit,
   onDelete,
 }: {
   project: ProjectCardModel;
+  onView?: (p: ProjectCardModel) => void;
   onEdit?: (p: ProjectCardModel) => void;
   onDelete?: (p: ProjectCardModel) => void;
 }) {
@@ -95,8 +97,13 @@ export default function ProjectCard({
         </div>
       </div>
 
-      {(onEdit || onDelete) && (
+      {(onView || onEdit || onDelete) && (
         <div className="relative mt-4 flex flex-wrap justify-end gap-2 border-t border-white/40 pt-4 dark:border-white/10">
+          {onView && (
+            <button type="button" className="btn-ghost !px-3 !py-1 !text-sm" onClick={() => onView(project)}>
+              View details
+            </button>
+          )}
           {onEdit && (
             <button type="button" className="btn-ghost !px-3 !py-1 !text-sm" onClick={() => onEdit(project)}>
               Edit

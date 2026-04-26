@@ -17,9 +17,16 @@ type UsageRow = {
 
 type MonitoringSummary = {
   total_actions: number;
+  actions_last_hour?: number;
+  actions_last_24h?: number;
   actions_by_agent: Record<string, number>;
   actions_by_tool: Record<string, number>;
-  token_usage: { total_tokens: number; cost_usd: number };
+  token_usage: {
+    total_tokens: number;
+    cost_usd: number;
+    total_tokens_24h?: number;
+    cost_usd_24h?: number;
+  };
   pending_approvals: number;
   approval_stats: {
     total_requests: number;
@@ -270,11 +277,18 @@ export default function Oversight() {
               <p className="mt-1 font-heading text-3xl text-ocean-900 dark:text-sand-100">
                 {monitoring?.total_actions ?? 0}
               </p>
+              <p className="mt-1 text-[11px] font-semibold text-ocean-600 dark:text-ocean-200/70">
+                Last hour: {monitoring?.actions_last_hour ?? 0} · Last 24h: {monitoring?.actions_last_24h ?? 0}
+              </p>
             </div>
             <div className="rounded-2xl border border-white/60 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
               <p className="text-xs font-bold uppercase tracking-wider text-coral-500">Pending approvals</p>
               <p className="mt-1 font-heading text-3xl text-ocean-900 dark:text-sand-100">
                 {monitoring?.pending_approvals ?? 0}
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-ocean-600 dark:text-ocean-200/70">
+                Approved: {monitoring?.approval_stats?.approved ?? 0} · Rejected:{" "}
+                {monitoring?.approval_stats?.rejected ?? 0}
               </p>
             </div>
             <div className="rounded-2xl border border-white/60 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
@@ -282,11 +296,17 @@ export default function Oversight() {
               <p className="mt-1 font-heading text-3xl text-ocean-900 dark:text-sand-100">
                 {monitoring?.token_usage?.total_tokens ?? 0}
               </p>
+              <p className="mt-1 text-[11px] font-semibold text-ocean-600 dark:text-ocean-200/70">
+                24h: {monitoring?.token_usage?.total_tokens_24h ?? 0} tokens
+              </p>
             </div>
             <div className="rounded-2xl border border-white/60 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
               <p className="text-xs font-bold uppercase tracking-wider text-coral-500">Estimated cost (USD)</p>
               <p className="mt-1 font-heading text-3xl text-ocean-900 dark:text-sand-100">
                 {(monitoring?.token_usage?.cost_usd ?? 0).toFixed(4)}
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-ocean-600 dark:text-ocean-200/70">
+                24h: ${(monitoring?.token_usage?.cost_usd_24h ?? 0).toFixed(4)}
               </p>
             </div>
           </div>

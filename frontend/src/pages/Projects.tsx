@@ -15,6 +15,33 @@ type ApiProject = {
   start_date?: string | null;
   end_date?: string | null;
   tags?: string[] | null;
+  budget?: number | string | null;
+  owner_id?: number | null;
+};
+
+type RelatedExperiment = {
+  id: number;
+  project_id: number | null;
+  result: string | null;
+  success: boolean | null;
+  notes: string | null;
+  created_at: string;
+};
+
+type RelatedEvent = {
+  id: number;
+  title: string;
+  start_at: string;
+  end_at: string | null;
+  all_day: boolean;
+  project_id: number | null;
+};
+
+type RelatedUser = {
+  id: number;
+  email: string;
+  full_name: string | null;
+  role: string;
 };
 
 function normalizeStatus(status: string): "planned" | "ongoing" | "completed" {
@@ -55,6 +82,11 @@ export default function Projects() {
   const [busy, setBusy] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ApiProject | null>(null);
+  const [viewing, setViewing] = useState<ApiProject | null>(null);
+  const [viewExperiments, setViewExperiments] = useState<RelatedExperiment[]>([]);
+  const [viewEvents, setViewEvents] = useState<RelatedEvent[]>([]);
+  const [viewOwner, setViewOwner] = useState<RelatedUser | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -137,6 +169,45 @@ export default function Projects() {
       end_date: p.end_date || "",
     });
     setModalOpen(true);
+  };
+
+  const openView = async (card: ProjectCardModel) => {
+    const p = items.find((x) => x.id === card.id);
+    if (!p) return;
+    setViewing(p);
+    setViewExperiments([]);
+    setViewEvents([]);
+    setViewOwner(null);
+    setViewLoading(true);
+    try {
+      const [exps, evts] = await Promise.all([
+        apiJson<RelatedExperiment[]>("/api/experiments").catch(() => [] as RelatedExperiment[]),
+        apiJson<RelatedEvent[]>("/api/events").catch(() => [] as RelatedEvent[]),
+      ]);
+      setViewExperiments(exps.filter((e) => e.project_id === p.id));
+      setViewEvents(evts.filter((e) => e.project_id === p.id));
+      if (p.owner_id != null) {
+        const users = await apiJson<RelatedUser[]>("/api/users").catch(() => [] as RelatedUser[]);
+        const owner = users.find((u) => u.id === p.owner_id) || null;
+        setViewOwner(owner);
+      }
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
+  const closeView = () => {
+    setViewing(null);
+    setViewExperiments([]);
+    setViewEvents([]);
+    setViewOwner(null);
+  };
+
+  const editFromView = () => {
+    if (!viewing) return;
+    const card = toCard(viewing);
+    closeView();
+    openEdit(card);
   };
 
   const save = async () => {
@@ -263,7 +334,13 @@ export default function Projects() {
       ) : (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((p) => (
-            <ProjectCard key={p.id} project={toCard(p)} onEdit={openEdit} onDelete={remove} />
+            <ProjectCard
+              key={p.id}
+              project={toCard(p)}
+              onView={(card) => void openView(card)}
+              onEdit={openEdit}
+              onDelete={remove}
+            />
           ))}
         </div>
       )}
@@ -373,6 +450,233 @@ export default function Projects() {
               <button type="button" className="btn-primary" onClick={() => void save()} disabled={busy || !form.name.trim()}>
                 Save
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewing && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ocean-900/50 p-4 backdrop-blur-sm sm:items-center">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-white/60 bg-white shadow-bubble dark:border-white/10 dark:bg-night-800">
+            <div className="flex items-start justify-between gap-3 border-b border-white/40 p-6 dark:border-white/10">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-widest text-coral-500">
+                  Project · #{viewing.id}
+                </p>
+                <h3 className="mt-1 truncate font-heading text-2xl text-ocean-900 dark:text-sand-100">
+                  {viewing.name}
+                </h3>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
+                  <span className="chip bg-ocean-100 text-ocean-700 dark:bg-ocean-500/20 dark:text-ocean-100">
+                    {normalizeStatus(viewing.status)}
+                  </span>
+                  <span className="chip bg-sand-200/70 text-sand-800 dark:bg-sand-300/20 dark:text-sand-100">
+                    Priority {viewing.priority}
+                  </span>
+                  {(viewing.tags || []).map((t) => (
+                    <span key={t} className="chip bg-coral-100 text-coral-700 dark:bg-coral-500/20 dark:text-coral-100">
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost !px-2 !py-1 !text-xs"
+                onClick={closeView}
+                aria-label="Close details"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-5 overflow-y-auto p-6">
+              <section>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-ocean-700 dark:text-ocean-200/80">
+                  Description
+                </h4>
+                <p className="mt-2 whitespace-pre-wrap text-sm font-semibold text-ocean-900/90 dark:text-sand-100/90">
+                  {viewing.description || "No description provided."}
+                </p>
+              </section>
+
+              <section>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-ocean-700 dark:text-ocean-200/80">
+                  Timeline
+                </h4>
+                <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-white/40 bg-white/60 p-3 dark:border-white/10 dark:bg-white/5">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-ocean-600 dark:text-ocean-200/70">
+                      Start date
+                    </p>
+                    <p className="mt-1 font-heading text-base text-ocean-900 dark:text-sand-100">
+                      {viewing.start_date || "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/40 bg-white/60 p-3 dark:border-white/10 dark:bg-white/5">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-ocean-600 dark:text-ocean-200/70">
+                      End date
+                    </p>
+                    <p className="mt-1 font-heading text-base text-ocean-900 dark:text-sand-100">
+                      {viewing.end_date || "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/40 bg-white/60 p-3 dark:border-white/10 dark:bg-white/5">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-ocean-600 dark:text-ocean-200/70">
+                      Deadline
+                    </p>
+                    <p className="mt-1 font-heading text-base text-ocean-900 dark:text-sand-100">
+                      {viewing.deadline || "—"}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-ocean-700 dark:text-ocean-200/80">
+                  Metadata
+                </h4>
+                <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-white/40 bg-white/60 p-3 dark:border-white/10 dark:bg-white/5">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-ocean-600 dark:text-ocean-200/70">
+                      Owner
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-ocean-900 dark:text-sand-100">
+                      {viewOwner
+                        ? `${viewOwner.full_name || viewOwner.email} · ${viewOwner.role}`
+                        : viewing.owner_id != null
+                          ? `User #${viewing.owner_id}`
+                          : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/40 bg-white/60 p-3 dark:border-white/10 dark:bg-white/5">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-ocean-600 dark:text-ocean-200/70">
+                      Created
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-ocean-900 dark:text-sand-100">
+                      {new Date(viewing.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  {viewing.budget != null && (
+                    <div className="rounded-2xl border border-white/40 bg-white/60 p-3 dark:border-white/10 dark:bg-white/5">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-ocean-600 dark:text-ocean-200/70">
+                        Budget
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-ocean-900 dark:text-sand-100">
+                        {String(viewing.budget)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-ocean-700 dark:text-ocean-200/80">
+                  Linked experiments{" "}
+                  <span className="ml-1 rounded-full bg-ocean-100 px-2 py-0.5 text-[10px] font-bold text-ocean-700 dark:bg-ocean-500/20 dark:text-ocean-100">
+                    {viewExperiments.length}
+                  </span>
+                </h4>
+                {viewLoading ? (
+                  <p className="mt-2 text-xs font-semibold text-ocean-600 dark:text-ocean-200/70">Loading…</p>
+                ) : viewExperiments.length === 0 ? (
+                  <p className="mt-2 text-xs font-semibold text-ocean-600 dark:text-ocean-200/70">
+                    No experiment logs linked to this project yet.
+                  </p>
+                ) : (
+                  <ul className="mt-2 space-y-2">
+                    {viewExperiments.slice(0, 6).map((e) => (
+                      <li
+                        key={e.id}
+                        className="rounded-2xl border border-white/40 bg-white/60 p-3 text-xs dark:border-white/10 dark:bg-white/5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-ocean-900 dark:text-sand-100">
+                            #{e.id} · {new Date(e.created_at).toLocaleDateString()}
+                          </span>
+                          <span
+                            className={`chip !text-[10px] ${
+                              e.success === true
+                                ? "bg-seaweed-100 text-seaweed-700"
+                                : e.success === false
+                                  ? "bg-coral-100 text-coral-700"
+                                  : "bg-sand-100 text-sand-700"
+                            }`}
+                          >
+                            {e.success === true ? "Success" : e.success === false ? "Failed" : "Pending"}
+                          </span>
+                        </div>
+                        {e.result && (
+                          <p className="mt-1 line-clamp-2 font-semibold text-ocean-800 dark:text-sand-100/90">
+                            {e.result}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                    {viewExperiments.length > 6 && (
+                      <li className="text-[11px] font-semibold text-ocean-600 dark:text-ocean-200/70">
+                        +{viewExperiments.length - 6} more — see Experiments page.
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </section>
+
+              <section>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-ocean-700 dark:text-ocean-200/80">
+                  Linked events{" "}
+                  <span className="ml-1 rounded-full bg-ocean-100 px-2 py-0.5 text-[10px] font-bold text-ocean-700 dark:bg-ocean-500/20 dark:text-ocean-100">
+                    {viewEvents.length}
+                  </span>
+                </h4>
+                {viewLoading ? (
+                  <p className="mt-2 text-xs font-semibold text-ocean-600 dark:text-ocean-200/70">Loading…</p>
+                ) : viewEvents.length === 0 ? (
+                  <p className="mt-2 text-xs font-semibold text-ocean-600 dark:text-ocean-200/70">
+                    No calendar events linked to this project.
+                  </p>
+                ) : (
+                  <ul className="mt-2 space-y-2">
+                    {viewEvents.slice(0, 6).map((ev) => (
+                      <li
+                        key={ev.id}
+                        className="rounded-2xl border border-white/40 bg-white/60 p-3 text-xs dark:border-white/10 dark:bg-white/5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-ocean-900 dark:text-sand-100">{ev.title}</span>
+                          <span className="text-[11px] font-semibold text-ocean-600 dark:text-ocean-200/70">
+                            {new Date(ev.start_at).toLocaleString()}
+                            {ev.end_at ? ` → ${new Date(ev.end_at).toLocaleString()}` : ""}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/40 p-4 dark:border-white/10">
+              <button type="button" className="btn-ghost" onClick={closeView}>
+                Close
+              </button>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-ghost" onClick={editFromView}>
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full bg-coral-500/90 px-4 py-2 text-sm font-bold text-white shadow-coral"
+                  onClick={() => {
+                    if (!viewing) return;
+                    const card = toCard(viewing);
+                    closeView();
+                    void remove(card);
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 import re
@@ -840,12 +840,106 @@ async def deepagent_approve(
     return {"status": "approved" if body.approved else "rejected", "response": response}
 
 
+_KNOWN_AGENT_NAMES = {"planner", "research-agent", "database-agent", "inventory-agent"}
+
+
+def _normalize_agent_label(raw: Any) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip().lower()
+    if not s:
+        return None
+    # Map generic / unhelpful labels.
+    if s in {"ai", "user", "human", "agent", "tool", "chain"}:
+        return None
+    if s in _KNOWN_AGENT_NAMES:
+        return s
+    if s.endswith("-agent"):
+        return s
+    return None
+
+
+def _aggregate_actions_meta(actions: list[AIActionLog]) -> tuple[dict[str, int], dict[str, int]]:
+    """Walk action_metadata.orchestration_trace + callback_events to count agents and tools."""
+    by_agent: dict[str, int] = {}
+    by_tool: dict[str, int] = {}
+    for row in actions:
+        agents_in_row: set[str] = set()
+        tools_in_row: set[str] = set()
+        # Always include the row-level agent (usually "planner").
+        if isinstance(row.agent, str) and row.agent.strip():
+            agents_in_row.add(row.agent.strip().lower())
+
+        md = row.action_metadata or {}
+        if not isinstance(md, dict):
+            md = {}
+
+        # orchestration_trace: list of {speaker, content, tool_calls?[]}
+        trace = md.get("orchestration_trace")
+        if isinstance(trace, list):
+            for step in trace:
+                if not isinstance(step, dict):
+                    continue
+                spk = _normalize_agent_label(step.get("speaker"))
+                if spk:
+                    agents_in_row.add(spk)
+                tcs = step.get("tool_calls")
+                if isinstance(tcs, list):
+                    for tc in tcs:
+                        if isinstance(tc, dict):
+                            name = tc.get("name")
+                            if isinstance(name, str) and name.strip():
+                                tools_in_row.add(name.strip())
+
+        # callback_events: list of {kind, name, ...} from LangChain callbacks
+        events = md.get("callback_events")
+        if isinstance(events, list):
+            for ev in events:
+                if not isinstance(ev, dict):
+                    continue
+                kind = ev.get("kind")
+                name = ev.get("name")
+                if kind in {"tool_start", "tool_end"} and isinstance(name, str) and name.strip():
+                    tools_in_row.add(name.strip())
+
+        # Legacy single-tool metadata fallback (older entries).
+        legacy_tool = md.get("tool") or md.get("tool_name")
+        if isinstance(legacy_tool, str) and legacy_tool.strip():
+            tools_in_row.add(legacy_tool.strip())
+
+        for a in agents_in_row:
+            by_agent[a] = by_agent.get(a, 0) + 1
+        for t in tools_in_row:
+            by_tool[t] = by_tool.get(t, 0) + 1
+    return by_agent, by_tool
+
+
 @router.get("/monitoring")
 async def deepagent_monitoring(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> dict:
+    now = datetime.now(timezone.utc)
+    one_hour_ago = now - timedelta(hours=1)
+    one_day_ago = now - timedelta(hours=24)
+
     total_actions = int((await db.scalar(select(func.count()).select_from(AIActionLog))) or 0)
+    actions_last_hour = int(
+        (
+            await db.scalar(
+                select(func.count()).select_from(AIActionLog).where(AIActionLog.created_at >= one_hour_ago)
+            )
+        )
+        or 0
+    )
+    actions_last_24h = int(
+        (
+            await db.scalar(
+                select(func.count()).select_from(AIActionLog).where(AIActionLog.created_at >= one_day_ago)
+            )
+        )
+        or 0
+    )
     pending_approvals = int(
         (await db.scalar(select(func.count()).select_from(AgentSqlProposal).where(AgentSqlProposal.status == "pending")))
         or 0
@@ -858,17 +952,17 @@ async def deepagent_monitoring(
     )
     total_tokens, total_cost = token_totals.one()
 
+    token_totals_24h = await db.execute(
+        select(
+            func.coalesce(func.sum(AIActionLog.tokens), 0),
+            func.coalesce(func.sum(AIActionLog.cost_usd), 0),
+        ).where(AIActionLog.created_at >= one_day_ago),
+    )
+    tokens_24h, cost_24h = token_totals_24h.one()
+
     recent = await db.execute(select(AIActionLog).order_by(AIActionLog.id.desc()).limit(500))
     actions = list(recent.scalars().all())
-    by_agent: dict[str, int] = {}
-    by_tool: dict[str, int] = {}
-    for row in actions:
-        if row.agent:
-            by_agent[row.agent] = by_agent.get(row.agent, 0) + 1
-        md = row.action_metadata or {}
-        tool_name = md.get("tool") or md.get("tool_name")
-        if isinstance(tool_name, str) and tool_name:
-            by_tool[tool_name] = by_tool.get(tool_name, 0) + 1
+    by_agent, by_tool = _aggregate_actions_meta(actions)
 
     approval_counts = await db.execute(
         select(
@@ -882,11 +976,15 @@ async def deepagent_monitoring(
 
     return {
         "total_actions": total_actions,
+        "actions_last_hour": actions_last_hour,
+        "actions_last_24h": actions_last_24h,
         "actions_by_agent": by_agent,
         "actions_by_tool": by_tool,
         "token_usage": {
             "total_tokens": int(total_tokens or 0),
             "cost_usd": float(total_cost or 0),
+            "total_tokens_24h": int(tokens_24h or 0),
+            "cost_usd_24h": float(cost_24h or 0),
         },
         "pending_approvals": pending_approvals,
         "approval_stats": {
