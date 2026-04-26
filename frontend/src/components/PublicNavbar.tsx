@@ -27,10 +27,10 @@ export default function PublicNavbar() {
           </div>
           <div className="leading-none">
             <p className="font-heading text-xl text-ocean-800 dark:text-sand-200">
-              Bikini Bottom
+              Sandy Lab
             </p>
             <p className="text-[10px] font-black uppercase tracking-[0.3em] text-coral-500">
-              Krusty Krab Co.
+              Treedome OS
             </p>
           </div>
         </Link>
@@ -69,13 +69,22 @@ export default function PublicNavbar() {
           </button>
 
           <button
+            type="button"
+            onClick={() => navigate("/login")}
+            className="btn-ghost !px-4 !py-2 !text-base"
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
             onClick={() => navigate("/dashboard")}
             className="btn-primary !px-5 !py-2 !text-base"
           >
-            Enter Dashboard
+            Lab dashboard
           </button>
 
           <button
+            type="button"
             className="rounded-full p-2 text-ocean-700 hover:bg-white/70 dark:text-ocean-100 dark:hover:bg-white/10 lg:hidden"
             onClick={() => setOpen((v) => !v)}
             aria-label="Open menu"

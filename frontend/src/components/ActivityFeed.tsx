@@ -19,7 +19,6 @@ export default function ActivityFeed({ items }) {
             From the reef
           </p>
         </div>
-        <button className="btn-ghost !px-3 !py-1 !text-xs">View all</button>
       </header>
 
       <ul className="space-y-4">

@@ -1,22 +1,34 @@
 import React, { useEffect, useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Navbar from "./Navbar";
 import Bubbles from "./Bubbles";
 import FlowerPattern from "./FlowerPattern";
+import { useAuth } from "../context/AuthContext";
+import { skipAuthUi } from "../lib/skipAuthUi";
 
-const TITLES = {
-  "/dashboard": { title: "Howdy, SpongeBob!", subtitle: "Krusty Krab Overview" },
-  "/projects": { title: "Projects", subtitle: "Coral Reef Board" },
-  "/team": { title: "The Crew", subtitle: "Meet the Team" },
-  "/calendar": { title: "Calendar", subtitle: "Under-the-Sea Schedule" },
-  "/settings": { title: "Settings", subtitle: "Your Pineapple, Your Rules" },
+const TITLES: Record<string, { title: string; subtitle: string }> = {
+  "/dashboard": { title: "Sandy’s Treedome", subtitle: "Lab overview & signals" },
+  "/projects": { title: "Research projects", subtitle: "Plan, track, ship science" },
+  "/inventory": { title: "Inventory", subtitle: "Reagents, gear, and stock levels" },
+  "/experiments": { title: "Experiment log", subtitle: "Results, notes, outcomes" },
+  "/assistant": { title: "Lab Assistant", subtitle: "Planner + specialist agents" },
+  "/oversight": { title: "AI oversight", subtitle: "Usage monitoring & approved database reads" },
+  "/calendar": { title: "Schedule", subtitle: "Field work, reviews, deadlines" },
+  "/settings": { title: "Settings", subtitle: "Profile & Treedome preferences" },
 };
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const meta = TITLES[pathname] || TITLES["/dashboard"];
+
+  const handleLogout = () => {
+    logout();
+    navigate(skipAuthUi() ? "/" : "/login");
+  };
 
   // Close the sidebar whenever we navigate on mobile
   useEffect(() => {
@@ -36,6 +48,8 @@ export default function Layout() {
             onOpenSidebar={() => setSidebarOpen(true)}
             title={meta.title}
             subtitle={meta.subtitle}
+            user={user}
+            onLogout={handleLogout}
           />
 
           <main className="flex-1 px-4 pb-16 pt-6 sm:px-6 lg:px-8">
@@ -43,7 +57,7 @@ export default function Layout() {
           </main>
 
           <footer className="px-4 pb-8 pt-2 text-center text-xs font-semibold text-ocean-700/70 dark:text-ocean-100/60">
-            🧽 Crafted in Bikini Bottom — Who lives in a pineapple under the sea?
+            🐿️ Sandy Lab OS — Treedome research, inventory, and AI helpers.
           </footer>
         </div>
       </div>

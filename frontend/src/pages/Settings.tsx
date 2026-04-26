@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { FormEvent, ReactNode } from "react";
 import PageHeader from "../components/PageHeader";
 import Icon from "../components/Icon";
 import { useTheme } from "../context/ThemeContext";
+import { useAuth } from "../context/AuthContext";
+import { apiJson } from "../lib/api";
 
 const ACCENT_OPTIONS = [
   { id: "sand", label: "Sandy Yellow", color: "from-sand-300 to-sand-500" },
@@ -20,17 +22,34 @@ type PrefKey =
   | "soundFx"
   | "reduceMotion";
 
+type ManagedUser = {
+  id: number;
+  email: string;
+  full_name: string | null;
+  role: string;
+};
+
 export default function Settings() {
   const { theme, setTheme } = useTheme();
+  const { user } = useAuth();
   const [accent, setAccent] = useState("sand");
-  const [avatar, setAvatar] = useState("🧽");
+  const [avatar, setAvatar] = useState("🐿️");
   const [profile, setProfile] = useState({
-    name: "SpongeBob SquarePants",
-    email: "spongebob@krustykrab.sea",
-    role: "Fry Cook & Morale Officer",
-    bio:
-      "I'm ready! Ready to serve the best Krabby Patties Bikini Bottom has ever seen.",
+    name: "",
+    email: "",
+    role: "",
+    bio: "Treedome research notes, karate breaks, and science-first documentation.",
   });
+
+  useEffect(() => {
+    if (!user) return;
+    setProfile((p) => ({
+      ...p,
+      name: user.full_name || user.email.split("@")[0] || "Scientist",
+      email: user.email,
+      role: user.role,
+    }));
+  }, [user]);
   const [prefs, setPrefs] = useState({
     notifOrders: true,
     notifCrew: true,
@@ -39,6 +58,15 @@ export default function Settings() {
     reduceMotion: false,
   });
   const [saved, setSaved] = useState(false);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [usersBusy, setUsersBusy] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [newUser, setNewUser] = useState({
+    email: "",
+    full_name: "",
+    role: "viewer",
+    password: "",
+  });
 
   const togglePref = (key: PrefKey) =>
     setPrefs((p) => ({ ...p, [key]: !p[key] }));
@@ -49,12 +77,75 @@ export default function Settings() {
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const loadUsers = async () => {
+    if (user?.role !== "admin") return;
+    setUsersError(null);
+    try {
+      const rows = await apiJson<ManagedUser[]>("/api/users");
+      setUsers(rows);
+    } catch (e: unknown) {
+      setUsersError(e instanceof Error ? e.message : "Failed to load users");
+    }
+  };
+
+  useEffect(() => {
+    void loadUsers();
+  }, [user?.role]);
+
+  const createUser = async () => {
+    if (!newUser.email.trim() || !newUser.password.trim()) return;
+    setUsersBusy(true);
+    setUsersError(null);
+    try {
+      await apiJson("/api/users", {
+        method: "POST",
+        body: JSON.stringify(newUser),
+      });
+      setNewUser({ email: "", full_name: "", role: "viewer", password: "" });
+      await loadUsers();
+    } catch (e: unknown) {
+      setUsersError(e instanceof Error ? e.message : "Failed to create user");
+    } finally {
+      setUsersBusy(false);
+    }
+  };
+
+  const updateRole = async (u: ManagedUser, role: string) => {
+    setUsersBusy(true);
+    setUsersError(null);
+    try {
+      await apiJson(`/api/users/${u.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role }),
+      });
+      await loadUsers();
+    } catch (e: unknown) {
+      setUsersError(e instanceof Error ? e.message : "Failed to update role");
+    } finally {
+      setUsersBusy(false);
+    }
+  };
+
+  const deleteUser = async (u: ManagedUser) => {
+    if (!window.confirm(`Delete user ${u.email}?`)) return;
+    setUsersBusy(true);
+    setUsersError(null);
+    try {
+      await apiJson(`/api/users/${u.id}`, { method: "DELETE" });
+      await loadUsers();
+    } catch (e: unknown) {
+      setUsersError(e instanceof Error ? e.message : "Failed to delete user");
+    } finally {
+      setUsersBusy(false);
+    }
+  };
+
   return (
     <form onSubmit={handleSave} className="space-y-6">
       <PageHeader
         emoji="⚙️"
         title="Settings"
-        subtitle="Your pineapple, your rules. Tweak your profile, appearance, and preferences."
+        subtitle="Treedome preferences. Profile fields mirror your signed-in lab account (API)."
         actions={
           <>
             <button type="button" className="btn-ghost">
@@ -133,13 +224,8 @@ export default function Settings() {
                 className="input"
               />
             </Field>
-            <Field label="Email">
-              <input
-                type="email"
-                value={profile.email}
-                onChange={(e) => setProfile({ ...profile, email: e.target.value })}
-                className="input"
-              />
+            <Field label="Email (from account)">
+              <input type="email" value={profile.email} readOnly className="input opacity-80" />
             </Field>
             <Field label="Role" className="sm:col-span-2">
               <input
@@ -295,6 +381,109 @@ export default function Settings() {
             />
           </ul>
         </section>
+
+        {user?.role === "admin" && (
+          <section className="glass-card p-5 sm:p-6 xl:col-span-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-heading text-xl text-ocean-800 dark:text-sand-200">Manage users</h3>
+                <p className="text-xs font-semibold uppercase tracking-widest text-coral-500">Admin only</p>
+              </div>
+              <button type="button" className="btn-ghost" onClick={() => void loadUsers()} disabled={usersBusy}>
+                Refresh users
+              </button>
+            </div>
+
+            {usersError && (
+              <div className="mt-3 rounded-2xl border border-coral-200 bg-coral-50 px-4 py-3 text-sm font-semibold text-coral-900 dark:border-coral-500/30 dark:bg-coral-900/20 dark:text-coral-100">
+                {usersError}
+              </div>
+            )}
+
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
+              <input
+                className="input"
+                placeholder="Email"
+                value={newUser.email}
+                onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
+              />
+              <input
+                className="input"
+                placeholder="Full name"
+                value={newUser.full_name}
+                onChange={(e) => setNewUser((p) => ({ ...p, full_name: e.target.value }))}
+              />
+              <select
+                className="input"
+                value={newUser.role}
+                onChange={(e) => setNewUser((p) => ({ ...p, role: e.target.value }))}
+              >
+                <option value="admin">admin</option>
+                <option value="researcher">researcher</option>
+                <option value="inventory">inventory</option>
+                <option value="viewer">viewer</option>
+              </select>
+              <input
+                className="input"
+                type="password"
+                placeholder="Temporary password"
+                value={newUser.password}
+                onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
+              />
+            </div>
+            <div className="mt-3">
+              <button type="button" className="btn-primary" onClick={() => void createUser()} disabled={usersBusy}>
+                Create user
+              </button>
+            </div>
+
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-white/50 dark:border-white/10">
+              <table className="min-w-full text-left text-sm">
+                <thead className="border-b border-white/50 bg-white/60 text-xs font-black uppercase tracking-widest text-ocean-600 dark:border-white/10 dark:bg-white/5 dark:text-ocean-200/80">
+                  <tr>
+                    <th className="px-4 py-3">ID</th>
+                    <th className="px-4 py-3">Email</th>
+                    <th className="px-4 py-3">Name</th>
+                    <th className="px-4 py-3">Role</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.id} className="border-b border-white/40 dark:border-white/5">
+                      <td className="px-4 py-3 font-bold">{u.id}</td>
+                      <td className="px-4 py-3">{u.email}</td>
+                      <td className="px-4 py-3">{u.full_name || "—"}</td>
+                      <td className="px-4 py-3">
+                        <select
+                          className="input !py-1"
+                          value={u.role}
+                          onChange={(e) => void updateRole(u, e.target.value)}
+                          disabled={usersBusy}
+                        >
+                          <option value="admin">admin</option>
+                          <option value="researcher">researcher</option>
+                          <option value="inventory">inventory</option>
+                          <option value="viewer">viewer</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          className="rounded-full bg-coral-500/90 px-3 py-1 text-sm font-bold text-white shadow-coral"
+                          disabled={usersBusy || u.id === user.id}
+                          onClick={() => void deleteUser(u)}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
       </div>
 
       {/* Danger zone */}
@@ -303,7 +492,7 @@ export default function Settings() {
           <div>
             <h3 className="font-heading text-xl">Danger zone</h3>
             <p className="mt-1 text-sm font-semibold opacity-80">
-              These actions can't be undone. Plankton would be pleased — don't do it.
+              For day-to-day sign-out, use the button in the top bar. Export/delete here are placeholders.
             </p>
           </div>
           <div className="flex gap-2">

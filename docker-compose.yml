@@ -1,8 +1,8 @@
-version: '3.8'
 name: codeitup-sandy-lab
+
 services:
   sandy-db:
-    image: all4n1/codeitup-postgres:latest   # your published image
+    image: all4n1/codeitup-postgres:latest
     container_name: codeitup-sandy-lab
     environment:
       POSTGRES_DB: sandy_lab
@@ -13,8 +13,9 @@ services:
     volumes:
       - sandy-db-data:/var/lib/postgresql/data
     restart: unless-stopped
+    networks:
+      - codeitup-network
 
-  # Optional pgAdmin – if you have pgAdmin installed locally, you can comment the pgadmin below.
   pgadmin:
     image: dpage/pgadmin4
     container_name: codeitup-pgadmin
@@ -28,6 +29,8 @@ services:
     depends_on:
       - sandy-db
     restart: unless-stopped
+    networks:
+      - codeitup-network
 
 volumes:
   sandy-db-data:

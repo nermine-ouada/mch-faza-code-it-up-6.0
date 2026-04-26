@@ -1,7 +1,22 @@
 import React from "react";
 import { ReactNode } from "react";
 
-const STATUS_STYLES = {
+const STATUS_STYLES: Record<
+  string,
+  { label: string; cls: string }
+> = {
+  planned: {
+    label: "Planned",
+    cls: "bg-ocean-100 text-ocean-800 dark:bg-ocean-800/40 dark:text-ocean-100",
+  },
+  ongoing: {
+    label: "Ongoing",
+    cls: "bg-ocean-200/70 text-ocean-800 dark:bg-ocean-700/40 dark:text-ocean-100",
+  },
+  completed: {
+    label: "Completed",
+    cls: "bg-seaweed-400/30 text-seaweed-600 dark:bg-seaweed-500/30 dark:text-seaweed-400",
+  },
   "in-progress": {
     label: "In Progress",
     cls: "bg-ocean-200/70 text-ocean-800 dark:bg-ocean-700/40 dark:text-ocean-100",

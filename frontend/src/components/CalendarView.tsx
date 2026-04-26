@@ -10,7 +10,17 @@ const TONE_BG = {
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-export default function CalendarView({ events }) {
+type CalendarEvent = {
+  id: number | string;
+  date: string;
+  title: string;
+  time?: string;
+  owner?: string;
+  tone?: "sand" | "ocean" | "coral" | "seaweed";
+  kind?: "project" | "event";
+};
+
+export default function CalendarView({ events }: { events: CalendarEvent[] }) {
   const today = new Date();
   const [cursor, setCursor] = useState({
     year: today.getFullYear(),
@@ -36,13 +46,17 @@ export default function CalendarView({ events }) {
   }, [cursor]);
 
   const eventsByDay = useMemo(() => {
-    const m = new Map();
+    const m = new Map<number, CalendarEvent[]>();
     for (const e of events) {
-      if (!m.has(e.date)) m.set(e.date, []);
-      m.get(e.date).push(e);
+      const dt = new Date(e.date);
+      if (Number.isNaN(dt.getTime())) continue;
+      if (dt.getMonth() !== cursor.month || dt.getFullYear() !== cursor.year) continue;
+      const day = dt.getDate();
+      if (!m.has(day)) m.set(day, []);
+      m.get(day)?.push(e);
     }
     return m;
-  }, [events]);
+  }, [events, cursor.month, cursor.year]);
 
   const shift = (delta) =>
     setCursor(({ year, month }) => {
@@ -105,7 +119,7 @@ export default function CalendarView({ events }) {
 
       <div className="mt-1 grid grid-cols-7 gap-1.5">
         {grid.map((day, idx) => {
-          const dayEvents = day ? eventsByDay.get(day) || [] : [];
+          const dayEvents: CalendarEvent[] = day ? eventsByDay.get(day) || [] : [];
           return (
             <div
               key={idx}
@@ -140,7 +154,7 @@ export default function CalendarView({ events }) {
                         className={`truncate rounded-lg border px-1.5 py-0.5 text-[10px] font-bold ${
                           TONE_BG[ev.tone] || TONE_BG.ocean
                         }`}
-                        title={`${ev.title} · ${ev.time} · ${ev.owner}`}
+                        title={`${ev.title} · ${ev.kind || "event"} · ${ev.time} · ${ev.owner}`}
                       >
                         {ev.title}
                       </div>

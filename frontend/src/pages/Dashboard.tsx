@@ -1,14 +1,8 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -19,12 +13,7 @@ import PageHeader from "../components/PageHeader";
 import StatCard from "../components/StatCard";
 import ChartCard from "../components/ChartCard";
 import ActivityFeed from "../components/ActivityFeed";
-import TaskList from "../components/TaskList";
-
-import stats from "../data/stats";
-import activities from "../data/activities";
-import tasks from "../data/tasks";
-import { salesData, trafficData, menuMixData } from "../data/chartData";
+import { apiJson } from "../lib/api";
 
 const tooltipStyle = {
   borderRadius: 16,
@@ -36,43 +25,189 @@ const tooltipStyle = {
   color: "#03385a",
 };
 
+type Project = { id: number; status: string };
+type Inv = { id: number; quantity: number; min_required: number };
+type Exp = { id: number; success: boolean | null; created_at: string };
+type UsageRow = {
+  id: number;
+  description: string | null;
+  created_at: string;
+  action_metadata?: Record<string, unknown> | null;
+};
+
 export default function Dashboard() {
+  const [counts, setCounts] = useState({
+    projects: 0,
+    ongoing: 0,
+    inventory: 0,
+    lowStock: 0,
+    experiments: 0,
+    successRate: 0,
+  });
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [inventory, setInventory] = useState<Inv[]>([]);
+  const [experiments, setExperiments] = useState<Exp[]>([]);
+  const [usage, setUsage] = useState<UsageRow[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [projectsRows, invRows, expRows, usageRows] = await Promise.all([
+          apiJson<Project[]>("/api/projects"),
+          apiJson<Inv[]>("/api/inventory"),
+          apiJson<Exp[]>("/api/experiments"),
+          apiJson<UsageRow[]>("/api/usage/activity?limit=30"),
+        ]);
+        if (cancelled) return;
+        const ongoing = projectsRows.filter((p) => p.status === "ongoing").length;
+        const low = invRows.filter((i) => i.quantity <= i.min_required).length;
+        const wins = expRows.filter((e) => e.success === true).length;
+        const decided = expRows.filter((e) => e.success !== null && e.success !== undefined).length;
+        const successRate = decided ? Math.round((wins / decided) * 100) : 0;
+        setProjects(projectsRows);
+        setInventory(invRows);
+        setExperiments(expRows);
+        setUsage(usageRows);
+        setCounts({
+          projects: projectsRows.length,
+          ongoing,
+          inventory: invRows.length,
+          lowStock: low,
+          experiments: expRows.length,
+          successRate,
+        });
+      } catch (e: unknown) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Could not load lab data");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const experimentSeries = useMemo(() => {
+    const byDay = new Map<string, { day: string; runs: number; successful: number }>();
+    for (let i = 6; i >= 0; i -= 1) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      byDay.set(key, {
+        day: d.toLocaleDateString(undefined, { weekday: "short" }),
+        runs: 0,
+        successful: 0,
+      });
+    }
+    for (const e of experiments) {
+      const key = new Date(e.created_at).toISOString().slice(0, 10);
+      const row = byDay.get(key);
+      if (!row) continue;
+      row.runs += 1;
+      if (e.success === true) row.successful += 1;
+    }
+    return Array.from(byDay.values());
+  }, [experiments]);
+
+  const inventoryMix = useMemo(() => {
+    const healthy = inventory.filter((i) => i.quantity > i.min_required).length;
+    const low = inventory.filter((i) => i.quantity <= i.min_required).length;
+    return [
+      { label: "Healthy stock", value: healthy },
+      { label: "At/below minimum", value: low },
+    ];
+  }, [inventory]);
+
+  const recentActivity = useMemo(
+    () =>
+      usage.slice(0, 8).map((u) => ({
+        id: u.id,
+        user: "Lab assistant",
+        emoji: "🤖",
+        action: u.description || "Logged an action",
+        time: new Date(u.created_at).toLocaleString(),
+        tone: "ocean",
+      })),
+    [usage],
+  );
+
+  const stats = [
+    {
+      id: "p",
+      label: "Active projects",
+      value: String(counts.projects),
+      delta: `${counts.ongoing} ongoing`,
+      trend: "up" as const,
+      accent: "sand" as const,
+      icon: "🍍",
+    },
+    {
+      id: "i",
+      label: "Inventory SKUs",
+      value: String(counts.inventory),
+      delta: `${counts.lowStock} at/below min`,
+      trend: "up" as const,
+      accent: "ocean" as const,
+      icon: "🧪",
+    },
+    {
+      id: "e",
+      label: "Experiment logs",
+      value: String(counts.experiments),
+      delta: `${counts.successRate}% success`,
+      trend: "up" as const,
+      accent: "coral" as const,
+      icon: "📓",
+    },
+    {
+      id: "a",
+      label: "Lab Assistant",
+      value: "AI",
+      delta: "Planner + 3 agents",
+      trend: "up" as const,
+      accent: "sand" as const,
+      icon: "🤖",
+    },
+  ];
+
   return (
     <div className="space-y-8">
       <PageHeader
-        emoji="🧽"
-        title="Welcome back, friend!"
-        subtitle="Here's what's cookin' at the Krusty Krab today. Flip a patty, check your crew, and keep Bikini Bottom happy."
+        emoji="🐿️"
+        title="Treedome command center"
+        subtitle="Track projects, stock, and experiments — with AI helpers when you need them."
         actions={
           <>
-            <button className="btn-ghost">Export</button>
-            <button className="btn-primary">+ New Order</button>
+            <a className="btn-ghost" href="/assistant">
+              Open Assistant
+            </a>
+            <a className="btn-primary" href="/projects">
+              + New project
+            </a>
           </>
         }
       />
 
-      {/* Stats */}
+      {loadError && (
+        <div className="rounded-2xl border border-coral-200 bg-coral-50 px-4 py-3 text-sm font-semibold text-coral-900 dark:border-coral-500/30 dark:bg-coral-900/20 dark:text-coral-100">
+          {loadError}
+        </div>
+      )}
+
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((s) => (
           <StatCard key={s.id} {...s} />
         ))}
       </section>
 
-      {/* Charts */}
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <ChartCard
-          title="Weekly Sales"
-          subtitle="Patties & drinks"
+          title="Weekly experiment runs"
+          subtitle="Real data from experiment logs"
           className="xl:col-span-2"
-          action={
-            <div className="flex gap-2">
-              <span className="chip bg-sand-300 text-sand-900">🍔 Patties</span>
-              <span className="chip bg-ocean-200 text-ocean-800">🥤 Drinks</span>
-            </div>
-          }
         >
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={salesData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <AreaChart data={experimentSeries} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <defs>
                 <linearGradient id="pattyGrad" x1="0" x2="0" y1="0" y2="1">
                   <stop offset="0%" stopColor="#ffcf1f" stopOpacity={0.8} />
@@ -89,7 +224,8 @@ export default function Dashboard() {
               <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: "#f5b301", strokeWidth: 2 }} />
               <Area
                 type="monotone"
-                dataKey="patties"
+                dataKey="runs"
+                name="Runs"
                 stroke="#d69100"
                 strokeWidth={3}
                 fill="url(#pattyGrad)"
@@ -97,7 +233,8 @@ export default function Dashboard() {
               />
               <Area
                 type="monotone"
-                dataKey="drinks"
+                dataKey="successful"
+                name="Successful"
                 stroke="#0a8fd8"
                 strokeWidth={3}
                 fill="url(#drinkGrad)"
@@ -107,90 +244,33 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Menu Mix" subtitle="Today's orders">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Tooltip contentStyle={tooltipStyle} />
-              <Pie
-                data={menuMixData}
-                dataKey="value"
-                nameKey="name"
-                innerRadius={55}
-                outerRadius={85}
-                paddingAngle={4}
-                stroke="rgba(255,255,255,0.9)"
-                strokeWidth={3}
-              >
-                {menuMixData.map((entry) => (
-                  <Cell key={entry.name} fill={entry.color} />
-                ))}
-              </Pie>
-              <Legend
-                verticalAlign="bottom"
-                iconType="circle"
-                wrapperStyle={{ fontFamily: "Nunito", fontWeight: 700, fontSize: 12 }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
+        <ChartCard title="Inventory health" subtitle="Current stock posture">
+          <ul className="space-y-3 text-sm font-semibold">
+            {inventoryMix.map((row) => (
+              <li key={row.label} className="flex items-center justify-between rounded-xl border border-white/50 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/5">
+                <span>{row.label}</span>
+                <span className="font-heading text-xl">{row.value}</span>
+              </li>
+            ))}
+          </ul>
         </ChartCard>
       </section>
 
-      <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <ChartCard
-          title="Hourly Traffic"
-          subtitle="Visitors today"
-          className="xl:col-span-2"
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={trafficData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-              <defs>
-                <linearGradient id="barGrad" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#f73d66" />
-                  <stop offset="100%" stopColor="#ff8aa0" />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="4 4" stroke="rgba(10,143,216,0.15)" />
-              <XAxis dataKey="hour" tickLine={false} axisLine={false} stroke="#0a8fd8" />
-              <YAxis tickLine={false} axisLine={false} stroke="#0a8fd8" />
-              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(247,61,102,0.08)" }} />
-              <Bar dataKey="visitors" fill="url(#barGrad)" radius={[10, 10, 4, 4]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <TaskList tasks={tasks} />
-      </section>
-
-      {/* Activity + shoutout */}
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="xl:col-span-2">
-          <ActivityFeed items={activities} />
+          <ActivityFeed items={recentActivity} />
         </div>
 
-        <aside className="coral-card flex flex-col justify-between p-6">
+        <aside className="coral-card p-6">
           <div>
-            <span className="chip bg-white/70 text-coral-700">🌟 Shoutout</span>
-            <h3 className="mt-3 font-heading text-2xl leading-tight">
-              Employee of the Month
-            </h3>
-            <p className="mt-2 text-sm font-semibold opacity-80">
-              For 127 perfectly flipped Krabby Patties and an unbeatable attitude.
-            </p>
+            <span className="chip bg-white/70 text-coral-700">📌 Operational focus</span>
+            <h3 className="mt-3 font-heading text-2xl leading-tight">Priority checkpoints</h3>
+            <ul className="mt-3 space-y-2 text-sm font-semibold">
+              <li>Ongoing projects: {counts.ongoing}</li>
+              <li>Low stock alerts: {counts.lowStock}</li>
+              <li>Experiment success rate: {counts.successRate}%</li>
+            </ul>
           </div>
-
-          <div className="mt-6 flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-white bg-white text-4xl shadow-bubble animate-bobble">
-              🧽
-            </div>
-            <div>
-              <p className="font-heading text-xl">SpongeBob</p>
-              <p className="text-xs font-bold uppercase tracking-widest opacity-80">
-                Fry Cook Extraordinaire
-              </p>
-            </div>
-          </div>
-
-          <button className="btn-primary mt-6 w-full">Send high five 🖐️</button>
         </aside>
       </section>
     </div>

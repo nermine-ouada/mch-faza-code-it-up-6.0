@@ -30,10 +30,10 @@ export default function Sidebar({ open, onClose }) {
             </div>
             <div>
               <p className="font-heading text-2xl leading-none text-ocean-800 dark:text-sand-200">
-                Bikini Bottom
+                Sandy Lab
               </p>
               <p className="text-xs font-bold uppercase tracking-widest text-coral-500">
-                Dashboard
+                Treedome OS
               </p>
             </div>
           </div>
@@ -78,16 +78,16 @@ export default function Sidebar({ open, onClose }) {
             <span className="text-3xl animate-wiggle">🍍</span>
             <div>
               <p className="font-heading text-lg text-ocean-900">
-                Need a hand?
+                Lab Assistant
               </p>
               <p className="text-xs opacity-80">
-                Ask SpongeBob — he's always happy to help.
+                Open the AI console to plan tasks with specialist agents.
               </p>
             </div>
           </div>
-          <button className="btn-primary mt-3 w-full !py-2 !text-base">
-            Contact support
-          </button>
+          <Link to="/assistant" className="btn-primary mt-3 flex w-full items-center justify-center !py-2 !text-base">
+            Open Assistant
+          </Link>
         </div>
 
         <Link

@@ -1,0 +1,1 @@
+"""Agent stack (deepagents + OpenRouter)."""

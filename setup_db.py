@@ -1,13 +1,30 @@
 # pip install psycopg2-binary
+import os
+from pathlib import Path
+
 import psycopg2
 
 DB_CONFIG = {
-    "dbname": "sandy_lab",
-    "user": "sandy",
-    "password": "sandy123",
-    "host": "localhost",
-    "port": "5433"
+    "dbname": os.environ.get("DB_NAME", "sandy_lab"),
+    "user": os.environ.get("DB_USER", "sandy"),
+    "password": os.environ.get("DB_PASSWORD", "sandy123"),
+    "host": os.environ.get("DB_HOST", "localhost"),
+    "port": os.environ.get("DB_PORT", "5433"),
 }
+
+_REPO_ROOT = Path(__file__).resolve().parent
+_MIGRATIONS_DIR = _REPO_ROOT / "database" / "migrations"
+_MIGRATE_MARKER = "---MIGRATE---"
+
+
+def _sql_segment_has_executable(segment: str) -> bool:
+    for line in segment.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if not s.startswith("--"):
+            return True
+    return False
 
 
 def create_tables(conn):
@@ -105,14 +122,35 @@ def create_tables(conn):
         """)
 
     conn.commit()
-    print("OK: All tables created successfully.")
+    print("OK: All base tables created successfully.")
+
+
+def run_migration_file(conn, path: Path) -> None:
+    if not path.is_file():
+        print("Skip migrations: file not found:", path)
+        return
+    raw = path.read_text(encoding="utf-8")
+    parts = [p.strip() for p in raw.split(_MIGRATE_MARKER)]
+    with conn.cursor() as cur:
+        for part in parts:
+            if not part:
+                continue
+            if not _sql_segment_has_executable(part):
+                continue
+            cur.execute(part)
+    conn.commit()
+    print("OK: Migrations applied:", path.name)
 
 
 def main():
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        create_tables(conn)
-        conn.close()
+        try:
+            create_tables(conn)
+            for migration_path in sorted(_MIGRATIONS_DIR.glob("*.sql")):
+                run_migration_file(conn, migration_path)
+        finally:
+            conn.close()
     except Exception as e:
         print("Error:", e)
 

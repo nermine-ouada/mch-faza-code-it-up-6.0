@@ -1,10 +1,8 @@
-# 🍍 Bikini Bottom Dashboard
+# 🍍 Sandy Lab – Treedome UI
 
-A **SpongeBob SquarePants-inspired** modern dashboard template built with **React.js** and **Tailwind CSS**.
-Features a public-facing landing site, a full internal admin dashboard, floating bubble animations,
-underwater flower patterns, glassmorphism cards, and a cozy "Bikini Bottom Night" dark mode.
+A **SpongeBob / Sandy Treedome–inspired** React + Tailwind dashboard wired to the **FastAPI** backend (`/api` via the Vite dev proxy). Public landing at **`/`**; lab app routes require **JWT** (**`/login`** register/sign-in).
 
-> Who lives in a pineapple under the sea? Your dashboard does, now.
+> Who lives in a pineapple under the sea? Your lab dashboard does, now.
 
 ---
 
@@ -25,20 +23,19 @@ underwater flower patterns, glassmorphism cards, and a cozy "Bikini Bottom Night
 
 ## 🗺️ Pages & Routes
 
-| Route         | Layout         | Purpose                                                 |
-| ------------- | -------------- | ------------------------------------------------------- |
-| `/`           | `PublicLayout` | **Home** — public landing page (hero, menu, reviews)    |
-| `/dashboard`  | `Layout`       | **Dashboard** — internal admin overview                 |
-| `/projects`   | `Layout`       | Project cards with progress bars & status badges        |
-| `/team`       | `Layout`       | Team member cards with avatars, roles, and skills       |
-| `/calendar`   | `Layout`       | Monthly schedule and upcoming events                    |
-| `/settings`   | `Layout`       | Profile, theme, accent color, and notification settings |
+| Route          | Auth | Purpose |
+| -------------- | ---- | ------- |
+| `/`            | no   | Public landing |
+| `/login`       | no   | Register / sign-in → JWT stored in `localStorage` |
+| `/dashboard`   | yes  | Lab overview (live counts from API) |
+| `/projects`    | yes  | CRUD on `projects` |
+| `/inventory`   | yes  | CRUD + **transactions** (`inventory_transactions`) |
+| `/experiments` | yes  | CRUD on `experiments_log` |
+| `/assistant`   | yes  | **Demo** multi-agent chat in-browser; set `VITE_LIVE_AGENT=true` for real SSE |
+| `/calendar`    | yes  | Same calendar template; Treedome copy |
+| `/settings`    | yes  | Theme + profile (email/role from `/api/auth/me`) |
 
-> The **Home page** is a public-facing website with a top navbar and footer only (no sidebar, no
-> analytics widgets). The **Dashboard area** uses a separate admin layout with a sidebar, top
-> navbar with search/profile/notifications, stats, charts, and activity widgets. You can move
-> between them via the **"Enter Dashboard"** button on Home and the **"Back to site"** button
-> in the sidebar.
+Vite **`server.proxy`** forwards **`/api`** → **`http://127.0.0.1:8000`**. Optional **`frontend/.env`**: see `frontend/.env.example` (`VITE_LIVE_AGENT`, `VITE_API_BASE`).
 
 ---
 
@@ -122,7 +119,7 @@ npm install
 npm run dev
 ```
 
-Then open <http://localhost:3000>.
+Then open <http://localhost:5173>.
 
 ### Build for production
 

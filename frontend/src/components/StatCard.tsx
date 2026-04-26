@@ -12,7 +12,7 @@ export default function StatCard({ label, value, delta, trend, icon, accent = "o
   const isUp = trend === "up";
 
   return (
-    <div className={`${cardClass} p-5`}>
+    <div className={`${cardClass} relative p-5`}>
       {/* Decorative bubble */}
       <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/40 blur-md dark:bg-white/10" />
 
