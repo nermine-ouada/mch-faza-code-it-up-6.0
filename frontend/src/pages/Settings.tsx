@@ -73,8 +73,18 @@ export default function Settings() {
 
   const handleSave = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    void (async () => {
+      try {
+        await apiJson("/api/users/me", {
+          method: "PATCH",
+          body: JSON.stringify({ full_name: profile.name }),
+        });
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } catch (e: unknown) {
+        setUsersError(e instanceof Error ? e.message : "Failed to update profile");
+      }
+    })();
   };
 
   const loadUsers = async () => {
@@ -148,9 +158,6 @@ export default function Settings() {
         subtitle="Treedome preferences. Profile fields mirror your signed-in lab account (API)."
         actions={
           <>
-            <button type="button" className="btn-ghost">
-              Reset
-            </button>
             <button type="submit" className="btn-primary">
               {saved ? "Saved!" : "Save Changes"}
             </button>
@@ -228,12 +235,7 @@ export default function Settings() {
               <input type="email" value={profile.email} readOnly className="input opacity-80" />
             </Field>
             <Field label="Role" className="sm:col-span-2">
-              <input
-                type="text"
-                value={profile.role}
-                onChange={(e) => setProfile({ ...profile, role: e.target.value })}
-                className="input"
-              />
+              <input type="text" value={profile.role} readOnly className="input opacity-80" />
             </Field>
             <Field label="Bio" className="sm:col-span-2">
               <textarea
@@ -486,28 +488,6 @@ export default function Settings() {
         )}
       </div>
 
-      {/* Danger zone */}
-      <section className="coral-card p-5 sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h3 className="font-heading text-xl">Danger zone</h3>
-            <p className="mt-1 text-sm font-semibold opacity-80">
-              For day-to-day sign-out, use the button in the top bar. Export/delete here are placeholders.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button type="button" className="btn-ghost">
-              Export data
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-full bg-coral-600 px-5 py-2.5 font-heading text-base text-white shadow-coral transition hover:-translate-y-0.5"
-            >
-              Delete account
-            </button>
-          </div>
-        </div>
-      </section>
     </form>
   );
 }

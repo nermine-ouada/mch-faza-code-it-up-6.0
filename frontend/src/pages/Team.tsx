@@ -39,13 +39,8 @@ export default function Team() {
       <PageHeader
         emoji="🐙"
         title="Meet the Crew"
-        subtitle="The one-of-a-kind underwater team that keeps the Krusty Krab afloat."
-        actions={
-          <>
-            <button className="btn-ghost">Export CSV</button>
-            <button className="btn-primary">+ Invite Member</button>
-          </>
-        }
+        subtitle="People coordinating projects, field ops, inventory, and lab experiments."
+        actions={<></>}
       />
 
       {/* Summary strip */}

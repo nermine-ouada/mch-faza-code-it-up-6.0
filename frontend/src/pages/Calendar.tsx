@@ -132,6 +132,7 @@ export default function CalendarPage() {
         emoji="📅"
         title="Calendar"
         subtitle="Track real project milestones and scheduled operational events."
+        actions={<></>}
       />
 
       {error && (
