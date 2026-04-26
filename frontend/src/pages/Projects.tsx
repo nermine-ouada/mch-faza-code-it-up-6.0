@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import ProjectCard, { type ProjectCardModel } from "../components/ProjectCard";
 import { apiFetch, apiJson } from "../lib/api";
+import { nextDemoProject } from "../lib/demoData";
 
 type ApiProject = {
   id: number;
@@ -92,8 +93,34 @@ export default function Projects() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: "", description: "", status: "planned", priority: 1, deadline: "", start_date: "", end_date: "" });
+    const demo = nextDemoProject();
+    setForm({
+      name: demo.name,
+      description: demo.description,
+      status: demo.status,
+      priority: demo.priority,
+      deadline: demo.deadline,
+      start_date: demo.start_date,
+      end_date: demo.end_date,
+    });
     setModalOpen(true);
+  };
+
+  const fillDemo = () => {
+    const demo = nextDemoProject();
+    setForm({
+      name: demo.name,
+      description: demo.description,
+      status: demo.status,
+      priority: demo.priority,
+      deadline: demo.deadline,
+      start_date: demo.start_date,
+      end_date: demo.end_date,
+    });
+  };
+
+  const clearForm = () => {
+    setForm({ name: "", description: "", status: "planned", priority: 1, deadline: "", start_date: "", end_date: "" });
   };
 
   const openEdit = (card: ProjectCardModel) => {
@@ -154,7 +181,10 @@ export default function Projects() {
 
   const remove = async (card: ProjectCardModel) => {
     if (!card.id) return;
-    if (!window.confirm(`Delete project “${card.name}”?`)) return;
+    const ok = window.confirm(
+      `Delete project “${card.name}”?\n\nThis will permanently remove it and any references in experiments. This action cannot be undone.`,
+    );
+    if (!ok) return;
     setBusy(true);
     try {
       const res = await apiFetch(`/api/projects/${card.id}`, { method: "DELETE" });
@@ -241,9 +271,28 @@ export default function Projects() {
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-ocean-900/50 p-4 backdrop-blur-sm sm:items-center">
           <div className="w-full max-w-lg rounded-3xl border border-white/60 bg-white p-6 shadow-bubble dark:border-white/10 dark:bg-night-800">
-            <h3 className="font-heading text-xl text-ocean-900 dark:text-sand-100">
-              {editing ? "Edit project" : "New project"}
-            </h3>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-heading text-xl text-ocean-900 dark:text-sand-100">
+                  {editing ? "Edit project" : "New project"}
+                </h3>
+                {!editing && (
+                  <p className="mt-1 text-xs font-semibold text-ocean-600 dark:text-ocean-200/70">
+                    Pre-filled with demo data — Save to test, or edit fields first.
+                  </p>
+                )}
+              </div>
+              {!editing && (
+                <div className="flex flex-none gap-2">
+                  <button type="button" className="btn-ghost !px-2 !py-1 !text-xs" onClick={fillDemo}>
+                    Re-fill demo
+                  </button>
+                  <button type="button" className="btn-ghost !px-2 !py-1 !text-xs" onClick={clearForm}>
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="mt-4 space-y-3">
               <label className="block text-xs font-bold uppercase tracking-widest text-ocean-700 dark:text-ocean-200/80">
                 Name

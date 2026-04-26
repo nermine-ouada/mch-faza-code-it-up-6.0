@@ -12,9 +12,19 @@
 
 - **`migrations/004_agent_supervision.sql`** – `agent_sql_proposals` for human-approved SELECTs from the database-agent.
 - **`migrations/005_seed_mock_data.sql`** – realistic sample data across notifications, projects, inventory, requirements, transactions, experiments, research cache, agent tasks/actions, and SQL proposal supervision rows.
+- **`migrations/006_projects_dates_and_events.sql`** – adds `projects.start_date`, `projects.end_date`, and creates `events`.
 
-`setup_db.py` runs every `database/migrations/*.sql` in **sorted** order (`002` … `005`, …).
+`setup_db.py` runs every `database/migrations/*.sql` in **sorted** order (`002` … `006`, …).
 - Applied automatically when you run **`python setup_db.py`** from the repo root (after base tables are created).
+
+## Reset non-user data + reseed
+
+To clear all tables except `users` and seed fresh mocks:
+
+```bash
+cd backend
+python -m app.reset_and_seed_non_users
+```
 
 ### Run only the migration file (manual)
 

@@ -9,6 +9,11 @@ from fastapi.responses import StreamingResponse
 import httpx
 
 from app.agents.planner import current_model_id, get_planner, rotate_model
+from app.agents.monitoring import (
+    AgentMonitoringCallbackHandler,
+    callbacks_to_orchestration_trace,
+    callbacks_token_usage,
+)
 from app.agents.request_context import agent_request_user_id
 from app.auth import get_current_user
 from app.config import get_settings
@@ -49,9 +54,12 @@ async def _openrouter_free_chat_completion(*, api_key: str, prompt: str) -> dict
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+    # OpenRouter only returns the `usage` block when explicitly requested.
+    # See https://openrouter.ai/docs/use-cases/usage-accounting
     payload = {
         "model": "openrouter/free",
         "messages": [{"role": "user", "content": prompt}],
+        "usage": {"include": True},
     }
     async with httpx.AsyncClient(timeout=45.0) as client:
         resp = await client.post(url, headers=headers, json=payload)
@@ -77,6 +85,23 @@ def _summary_sql() -> str:
         "(SELECT COUNT(*) FROM experiments_log) AS experiments_total, "
         "(SELECT COUNT(*) FROM experiments_log WHERE success IS TRUE) AS experiments_success"
     )
+
+
+def _usage_from_openrouter_response(data: dict[str, Any]) -> tuple[int | None, float | None]:
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return None, None
+    try:
+        total = usage.get("total_tokens")
+        tokens = int(total) if total is not None else None
+    except Exception:  # noqa: BLE001
+        tokens = None
+    try:
+        cost_raw = usage.get("cost") or usage.get("cost_usd")
+        cost = float(cost_raw) if cost_raw is not None else None
+    except Exception:  # noqa: BLE001
+        cost = None
+    return tokens, cost
 
 
 @router.post("/stream")
@@ -123,6 +148,9 @@ async def stream_agent_run(
         agent_request_user_id.set(user.id)
         updates: list[str] = []
         final_response = ""
+        callback_events: list[dict[str, Any]] = []
+        total_tokens: int | None = None
+        total_cost: float | None = None
         try:
             if settings.openrouter_model.strip() == "openrouter/free":
                 yield (
@@ -193,6 +221,7 @@ async def stream_agent_run(
                     api_key=settings.openrouter_api_key.strip(),
                     prompt=prompt_text,
                 )
+                total_tokens, total_cost = _usage_from_openrouter_response(data)
                 reply = (
                     data.get("choices", [{}])[0]
                     .get("message", {})
@@ -238,13 +267,17 @@ async def stream_agent_run(
                 model_id = current_model_id()
                 try:
                     planner = get_planner()
+                    cb = AgentMonitoringCallbackHandler(source="chat_stream", session_id=session_id)
                     if attempt > 0:
                         yield f"data: {json.dumps({'update': {'meta': f'retrying with {model_id}'}})}\n\n"
-                    async for chunk in planner.astream(payload, stream_mode="updates"):
+                    config = {"configurable": {"thread_id": session_id}, "callbacks": [cb]}
+                    async for chunk in planner.astream(payload, config=config, stream_mode="updates"):
                         line = json.dumps({"update": chunk}, default=_json_default)
                         if len(updates) < 200:
                             updates.append(line[:1000])
                         yield f"data: {line}\n\n"
+                    callback_events = cb.events
+                    total_tokens, total_cost = callbacks_token_usage(callback_events)
                     return
                 except Exception as exc:  # noqa: BLE001
                     last_exc = exc
@@ -285,8 +318,14 @@ async def stream_agent_run(
                         elif updates:
                             meta["response_text"] = "\n".join(updates)[:20000]
                             meta["response_chars"] = len(meta["response_text"])
+                        if callback_events:
+                            meta["callback_events"] = callback_events[:400]
+                            if not isinstance(meta.get("orchestration_trace"), list):
+                                meta["orchestration_trace"] = callbacks_to_orchestration_trace(callback_events)[:200]
                         meta["update_count"] = len(updates)
                         row.action_metadata = meta
+                        row.tokens = total_tokens
+                        row.cost_usd = total_cost
                         await db2.commit()
             except Exception:  # noqa: BLE001
                 _log.exception("chat.stream: failed to persist session history")

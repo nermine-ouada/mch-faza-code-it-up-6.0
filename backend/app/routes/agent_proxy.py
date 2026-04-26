@@ -7,11 +7,16 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.agents.planner import current_model_id, get_planner, rotate_model
+from app.agents.monitoring import (
+    AgentMonitoringCallbackHandler,
+    callbacks_to_orchestration_trace,
+    callbacks_token_usage,
+)
 from app.agents.request_context import agent_request_user_id
 from app.agents.tools.db_tools import validate_read_only_select
 from app.auth import get_current_user
@@ -24,7 +29,9 @@ _SESSIONS: dict[str, dict[str, Any]] = {}
 _log = logging.getLogger(__name__)
 _MAX_SESSION_MESSAGES = 24
 _WRITE_INTENT_RE = re.compile(
-    r"\b(create|add|insert|update|edit|modify|change|delete|remove|set status|record stock|restock|deduct)\b",
+    # Keep this strict: only explicit mutation verbs should trigger write approval.
+    # "restock suggestions" and similar planning prompts must remain read-only.
+    r"\b(create|add|insert|update|edit|modify|change|delete|remove|set|set status|deduct)\b",
     re.IGNORECASE,
 )
 _DELETE_INTENT_RE = re.compile(r"\b(delete|remove)\b", re.IGNORECASE)
@@ -34,6 +41,22 @@ _PRIORITY_RE = re.compile(r"\bpriority\s*(?:to|=)?\s*(\d{1,2})\b", re.IGNORECASE
 _PROJECT_QUOTED_RE = re.compile(r"project\s+[\"']([^\"']+)[\"']", re.IGNORECASE)
 _PROJECT_FALLBACK_RE = re.compile(r"project\s+([a-z0-9][a-z0-9 \-_]{1,80})", re.IGNORECASE)
 _DESCRIPTION_RE = re.compile(r"\bdescription\s*(?:=|to|:)?\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
+
+
+def _is_explicit_read_intent(message: str) -> bool:
+    m = (message or "").lower()
+    if not m.strip():
+        return False
+    read_verbs = ("list", "show", "summarize", "get", "fetch", "find")
+    read_targets = (
+        "low-stock",
+        "low stock",
+        "inventory items",
+        "projects with deadlines",
+        "next 14 days",
+        "due in the next 14 days",
+    )
+    return any(v in m for v in read_verbs) and any(t in m for t in read_targets)
 
 
 class AgentChatRequest(BaseModel):
@@ -145,11 +168,13 @@ def _fallback_response_from_trace(trace: list[dict[str, Any]]) -> str:
     return "I completed the step, but no final text was returned."
 
 
-def _invoke_planner(messages: list[dict[str, str]], session_id: str) -> Any:
+def _invoke_planner(messages: list[dict[str, str]], session_id: str) -> tuple[Any, list[dict[str, Any]]]:
     planner = get_planner()
+    cb = AgentMonitoringCallbackHandler(source="agent_chat", session_id=session_id)
     payload = {"messages": messages}
-    config = {"configurable": {"thread_id": session_id}}
-    return planner.invoke(payload, config=config)
+    config = {"configurable": {"thread_id": session_id}, "callbacks": [cb]}
+    result = planner.invoke(payload, config=config)
+    return result, cb.events
 
 
 def _history_for_session(session_id: str) -> list[dict[str, str]]:
@@ -199,7 +224,49 @@ def _looks_like_retryable_model_error(exc: Exception) -> bool:
 
 
 def _is_write_intent(message: str) -> bool:
+    if _is_explicit_read_intent(message):
+        return False
     return bool(_WRITE_INTENT_RE.search(message or ""))
+
+
+def _is_projects_deadline_read_intent(message: str) -> bool:
+    m = (message or "").lower()
+    return (
+        ("project" in m or "projects" in m)
+        and ("deadline" in m or "deadlines" in m or "due" in m)
+        and ("14 day" in m or "next 14" in m)
+    )
+
+
+def _projects_deadline_read_sql() -> str:
+    return (
+        "SELECT p.id, p.name, p.deadline, p.status, "
+        "COALESCE(u.full_name, u.email, 'Unassigned') AS owner\n"
+        "FROM projects p\n"
+        "LEFT JOIN users u ON u.id = p.owner_id\n"
+        "WHERE p.deadline >= CURRENT_DATE\n"
+        "  AND p.deadline <= (CURRENT_DATE + INTERVAL '14 day')\n"
+        "ORDER BY p.deadline ASC, p.id ASC;"
+    )
+
+
+def _build_read_approval_details(
+    *,
+    proposal_id: int,
+    requested_action: str,
+    summary: str,
+    rationale: str | None = None,
+    planned_read: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "read_intent",
+        "message": "A read operation was detected and is waiting for your approval.",
+        "proposal_id": proposal_id,
+        "requested_action": requested_action[:1200],
+        "summary": summary,
+        "rationale": rationale,
+        "planned_read": planned_read or {"kind": "select_read", "mode": "human_approved"},
+    }
 
 
 def _execute_select_sync(sql: str) -> tuple[Optional[str], Optional[str]]:
@@ -470,6 +537,62 @@ async def deepagent_chat(
             "orchestration_trace": trace,
         }
 
+    if _is_projects_deadline_read_intent(prompt):
+        sql_text = _projects_deadline_read_sql()
+        prop = AgentSqlProposal(
+            user_id=user.id,
+            sql_text=sql_text,
+            rationale="Deterministic read template for projects due in next 14 days (owner + status).",
+            status="pending",
+        )
+        db.add(prop)
+        await db.flush()
+        trace = [
+            {"step": 1, "speaker": "planner", "content": "Detected deadline-read intent and delegated to database-agent."},
+            {"step": 2, "speaker": "database-agent", "content": "Prepared deterministic PostgreSQL SELECT proposal."},
+        ]
+        db.add(
+            AIActionLog(
+                action_type="agent_chat",
+                description=prompt[:2000],
+                user_id=user.id,
+                agent="planner",
+                action_metadata={
+                    "session_id": session_id,
+                    "prompt_chars": len(prompt),
+                    "pending_approval": True,
+                    "approval_type": "read_select",
+                    "orchestration_trace": trace,
+                },
+            ),
+        )
+        await db.commit()
+        current = _SESSIONS.get(session_id, {})
+        if not isinstance(current, dict):
+            current = {}
+        current["proposal_id"] = prop.id
+        current["user_id"] = user.id
+        if "messages" not in current:
+            current["messages"] = _history_for_session(session_id)
+        _SESSIONS[session_id] = current
+        return {
+            "session_id": session_id,
+            "response": "I prepared the read action for projects due in the next 14 days. Approve to execute it.",
+            "pending_approval": True,
+            "approval_details": _build_read_approval_details(
+                proposal_id=prop.id,
+                requested_action=prompt,
+                summary="List projects due in the next 14 days with owner and status.",
+                rationale=prop.rationale,
+                planned_read={
+                    "kind": "projects_deadline_window",
+                    "window_days": 14,
+                    "fields": ["name", "deadline", "owner", "status"],
+                },
+            ),
+            "orchestration_trace": trace,
+        }
+
     before_id = await db.scalar(
         select(func.max(AgentSqlProposal.id)).where(AgentSqlProposal.user_id == user.id),
     )
@@ -479,12 +602,13 @@ async def deepagent_chat(
     try:
         last_exc: Exception | None = None
         result = None
+        callback_events: list[dict[str, Any]] = []
         prior_messages = _history_for_session(session_id)
         for attempt in range(attempts):
             model_id = current_model_id()
             try:
                 planner_messages = prior_messages + [{"role": "user", "content": prompt}]
-                result = await run_in_threadpool(_invoke_planner, planner_messages, session_id)
+                result, callback_events = await run_in_threadpool(_invoke_planner, planner_messages, session_id)
                 break
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
@@ -507,9 +631,12 @@ async def deepagent_chat(
         agent_request_user_id.reset(token)
 
     trace = _extract_orchestration_trace(result)
+    if not trace and callback_events:
+        trace = callbacks_to_orchestration_trace(callback_events)
     response_text = _extract_response_text(result)
     if not response_text.strip():
         response_text = _fallback_response_from_trace(trace)
+    total_tokens, total_cost = callbacks_token_usage(callback_events)
     _append_session_message(session_id, "assistant", response_text)
     pending = await db.execute(
         select(AgentSqlProposal)
@@ -531,20 +658,31 @@ async def deepagent_chat(
             "response_text": response_text[:20000],
             "pending_approval": proposal is not None,
             "orchestration_trace": trace[:200],
+            "callback_events": callback_events[:400],
         },
+        tokens=total_tokens,
+        cost_usd=total_cost,
     )
     db.add(log)
     await db.commit()
 
     approval_details = None
     if proposal is not None:
-        _SESSIONS[session_id] = {"proposal_id": proposal.id, "user_id": user.id}
-        approval_details = {
-            "proposal_id": proposal.id,
-            "tool_name": "propose_select_query",
-            "sql": proposal.sql_text,
-            "rationale": proposal.rationale,
-        }
+        current = _SESSIONS.get(session_id, {})
+        if not isinstance(current, dict):
+            current = {}
+        current["proposal_id"] = proposal.id
+        current["user_id"] = user.id
+        # Preserve accumulated chat history so follow-up prompts keep context.
+        if "messages" not in current:
+            current["messages"] = _history_for_session(session_id)
+        _SESSIONS[session_id] = current
+        approval_details = _build_read_approval_details(
+            proposal_id=proposal.id,
+            requested_action=prompt,
+            summary="Database read prepared by database-agent and waiting for approval.",
+            rationale=proposal.rationale,
+        )
         if not response_text:
             response_text = "A database read proposal requires your approval."
 
@@ -619,10 +757,11 @@ async def deepagent_approve(
 
         original_prompt = str(session.get("original_prompt") or "")
         token = agent_request_user_id.set(user.id)
+        callback_events: list[dict[str, Any]] = []
         try:
             prior_messages = _history_for_session(body.session_id)
             planner_messages = prior_messages + [{"role": "user", "content": original_prompt}]
-            result = await run_in_threadpool(_invoke_planner, planner_messages, body.session_id)
+            result, callback_events = await run_in_threadpool(_invoke_planner, planner_messages, body.session_id)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
         finally:
@@ -630,6 +769,8 @@ async def deepagent_approve(
         response_text = _extract_response_text(result) or "Approved and executed."
         _append_session_message(body.session_id, "assistant", response_text)
         trace = _extract_orchestration_trace(result)
+        if not trace and callback_events:
+            trace = callbacks_to_orchestration_trace(callback_events)
         db.add(
             AIActionLog(
                 action_type="agent_approval",
@@ -641,6 +782,7 @@ async def deepagent_approve(
                     "approved": True,
                     "approval_type": "write_intent",
                     "orchestration_trace": trace[:200],
+                    "callback_events": callback_events[:400],
                 },
             ),
         )
@@ -660,7 +802,11 @@ async def deepagent_approve(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Proposal is not pending")
 
     if body.approved:
-        result_text, err = await run_in_threadpool(_execute_select_sync, proposal.sql_text)
+        err, cleaned = validate_read_only_select(proposal.sql_text)
+        if err or cleaned is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, err or "Invalid SQL proposal")
+        proposal.sql_text = cleaned
+        result_text, err = await run_in_threadpool(_execute_select_sync, cleaned)
         if err:
             proposal.status = "rejected"
             proposal.error_text = err
@@ -727,9 +873,9 @@ async def deepagent_monitoring(
     approval_counts = await db.execute(
         select(
             func.count().label("total"),
-            func.sum(func.case((AgentSqlProposal.status == "approved", 1), else_=0)).label("approved"),
-            func.sum(func.case((AgentSqlProposal.status == "rejected", 1), else_=0)).label("rejected"),
-            func.sum(func.case((AgentSqlProposal.status == "pending", 1), else_=0)).label("pending"),
+            func.sum(case((AgentSqlProposal.status == "approved", 1), else_=0)).label("approved"),
+            func.sum(case((AgentSqlProposal.status == "rejected", 1), else_=0)).label("rejected"),
+            func.sum(case((AgentSqlProposal.status == "pending", 1), else_=0)).label("pending"),
         ),
     )
     a_total, a_approved, a_rejected, a_pending = approval_counts.one()

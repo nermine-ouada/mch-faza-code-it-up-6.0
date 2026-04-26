@@ -78,9 +78,10 @@ export default function CalendarPage() {
     () =>
       projects.map((p) => ({
         id: `project-${p.id}`,
-        date: p.end_date || p.deadline || p.start_date || p.created_at,
+        date: p.start_date || p.created_at,
+        endDate: p.end_date || p.deadline || p.start_date || p.created_at,
         title: p.name,
-        time: p.end_date ? "Project end" : p.deadline ? "Deadline" : p.start_date ? "Project start" : "Created",
+        time: p.end_date || p.deadline ? "Project span" : p.start_date ? "Project start" : "Created",
         owner: p.owner_id ? `User #${p.owner_id}` : "Unassigned",
         tone:
           p.status === "completed"
@@ -98,6 +99,7 @@ export default function CalendarPage() {
       events.map((e) => ({
         id: `event-${e.id}`,
         date: e.start_at,
+        endDate: e.end_at || e.start_at,
         title: e.title,
         time: e.all_day ? "All day" : "Scheduled event",
         owner: e.owner_id ? `User #${e.owner_id}` : "Unassigned",

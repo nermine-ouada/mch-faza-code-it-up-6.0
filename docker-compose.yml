@@ -2,8 +2,8 @@ name: codeitup-sandy-lab
 
 services:
   sandy-db:
-    image: all4n1/codeitup-postgres:latest
-    container_name: codeitup-sandy-lab
+    image: postgres:16-alpine
+    container_name: codeitup-sandy-db
     environment:
       POSTGRES_DB: sandy_lab
       POSTGRES_USER: sandy
@@ -12,6 +12,79 @@ services:
       - "5433:5432"
     volumes:
       - sandy-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sandy -d sandy_lab"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - codeitup-network
+
+  db-setup:
+    image: python:3.11-slim
+    container_name: codeitup-db-setup
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      DB_NAME: sandy_lab
+      DB_USER: sandy
+      DB_PASSWORD: sandy123
+      DB_HOST: sandy-db
+      DB_PORT: 5432
+    depends_on:
+      sandy-db:
+        condition: service_healthy
+    command: >
+      sh -lc "pip install --no-cache-dir psycopg2-binary &&
+      python setup_db.py"
+    restart: "no"
+    networks:
+      - codeitup-network
+
+  backend:
+    image: python:3.11-slim
+    container_name: codeitup-backend
+    working_dir: /app/backend
+    volumes:
+      - ./:/app
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sandy:sandy123@sandy-db:5432/sandy_lab
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000
+      CORS_ORIGIN_REGEX: ^https?://(localhost|127\.0\.0\.1)(:\d+)?$
+    depends_on:
+      sandy-db:
+        condition: service_healthy
+      db-setup:
+        condition: service_completed_successfully
+    command: >
+      sh -lc "pip install --no-cache-dir -r requirements.txt &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - codeitup-network
+
+  frontend:
+    image: node:20-alpine
+    container_name: codeitup-frontend
+    working_dir: /app/frontend
+    volumes:
+      - ./:/app
+      - frontend-node-modules:/app/frontend/node_modules
+    env_file:
+      - ./frontend/.env
+    depends_on:
+      - backend
+    command: >
+      sh -lc "npm ci &&
+      npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
     restart: unless-stopped
     networks:
       - codeitup-network
@@ -27,7 +100,8 @@ services:
     volumes:
       - pgadmin-data:/var/lib/pgadmin
     depends_on:
-      - sandy-db
+      sandy-db:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - codeitup-network
@@ -37,6 +111,8 @@ volumes:
     name: codeitup-sandy-db-data
   pgadmin-data:
     name: codeitup-pgadmin-data
+  frontend-node-modules:
+    name: codeitup-frontend-node-modules
 
 networks:
   codeitup-network:

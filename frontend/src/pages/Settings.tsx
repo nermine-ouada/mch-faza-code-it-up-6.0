@@ -5,6 +5,7 @@ import Icon from "../components/Icon";
 import { useTheme } from "../context/ThemeContext";
 import { useAuth } from "../context/AuthContext";
 import { apiJson } from "../lib/api";
+import { nextDemoUser } from "../lib/demoData";
 
 const ACCENT_OPTIONS = [
   { id: "sand", label: "Sandy Yellow", color: "from-sand-300 to-sand-500" },
@@ -61,12 +62,16 @@ export default function Settings() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [usersBusy, setUsersBusy] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
-  const [newUser, setNewUser] = useState({
-    email: "",
-    full_name: "",
-    role: "viewer",
-    password: "",
-  });
+  const [newUser, setNewUser] = useState<{
+    email: string;
+    full_name: string;
+    role: string;
+    password: string;
+  }>({ email: "", full_name: "", role: "viewer", password: "" });
+
+  const fillDemoUser = () => setNewUser(nextDemoUser());
+  const clearNewUser = () =>
+    setNewUser({ email: "", full_name: "", role: "viewer", password: "" });
 
   const togglePref = (key: PrefKey) =>
     setPrefs((p) => ({ ...p, [key]: !p[key] }));
@@ -100,6 +105,10 @@ export default function Settings() {
 
   useEffect(() => {
     void loadUsers();
+    if (user?.role === "admin" && !newUser.email) {
+      setNewUser(nextDemoUser());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
 
   const createUser = async () => {
@@ -137,7 +146,10 @@ export default function Settings() {
   };
 
   const deleteUser = async (u: ManagedUser) => {
-    if (!window.confirm(`Delete user ${u.email}?`)) return;
+    const ok = window.confirm(
+      `Delete user ${u.email}?\n\nName: ${u.full_name || "—"}\nRole: ${u.role}\n\nThis user will lose access immediately. This action cannot be undone.`,
+    );
+    if (!ok) return;
     setUsersBusy(true);
     setUsersError(null);
     try {
@@ -433,10 +445,19 @@ export default function Settings() {
                 onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
               />
             </div>
-            <div className="mt-3">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <button type="button" className="btn-primary" onClick={() => void createUser()} disabled={usersBusy}>
                 Create user
               </button>
+              <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={fillDemoUser}>
+                Re-fill demo
+              </button>
+              <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={clearNewUser}>
+                Clear
+              </button>
+              <span className="text-xs font-semibold text-ocean-600 dark:text-ocean-200/70">
+                Form pre-filled with a demo user — edit or use as-is.
+              </span>
             </div>
 
             <div className="mt-4 overflow-x-auto rounded-2xl border border-white/50 dark:border-white/10">

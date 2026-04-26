@@ -13,6 +13,42 @@ type ChatLine = {
 const LIVE = import.meta.env.VITE_LIVE_AGENT === "true";
 const USE_DEEPAGENT = import.meta.env.VITE_AGENT_ARCH === "deepagent";
 const SESSION_KEY = "lab_assistant_session_id";
+const CHAT_HISTORY_KEY_PREFIX = "lab_assistant_chat_history_";
+const PENDING_KEY_PREFIX = "lab_assistant_pending_";
+const PROMPT_HISTORY_KEY_PREFIX = "lab_assistant_prompt_history_";
+const PROMPT_HISTORY_LIMIT = 50;
+const SUGGESTED_PROMPTS: Array<{ id: string; label: string; text: string }> = [
+  {
+    id: "research-1",
+    label: "Research agent",
+    text: "Research 3 evidence-based coral growth monitoring protocols and cite peer-reviewed sources.",
+  },
+  {
+    id: "research-2",
+    label: "Research follow-up",
+    text: "Elaborate on protocol #2 with practical field implementation steps and risk controls.",
+  },
+  {
+    id: "database-read-1",
+    label: "Database agent (read)",
+    text: "Show me projects with deadlines in the next 14 days and include owner and status.",
+  },
+  {
+    id: "database-write-1",
+    label: "Database agent (write)",
+    text: "Update project \"Coral Growth Trial - Alpha\" status to ongoing and priority to 4.",
+  },
+  {
+    id: "inventory-1",
+    label: "Inventory agent",
+    text: "List low-stock inventory items and suggest restock quantities for this week.",
+  },
+  {
+    id: "planner-1",
+    label: "Planner orchestration",
+    text: "Plan this week: check low stock, summarize active projects, then propose next experiment priorities.",
+  },
+];
 
 function makeSessionId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
@@ -24,6 +60,73 @@ function getOrCreateSessionId(): string {
   const next = makeSessionId();
   localStorage.setItem(SESSION_KEY, next);
   return next;
+}
+
+function makeWelcomeLine(text?: string): ChatLine {
+  return {
+    id: "welcome",
+    role: "assistant",
+    agent: "Planner",
+    content:
+      text ||
+      "Hi! I'm the Treedome Planner (demo). Ask about inventory, experiments, or research workflows. Live mode uses OpenRouter; database reads go through **AI oversight** for human approval.",
+  };
+}
+
+function historyKey(sessionId: string): string {
+  return `${CHAT_HISTORY_KEY_PREFIX}${sessionId}`;
+}
+
+function pendingKey(sessionId: string): string {
+  return `${PENDING_KEY_PREFIX}${sessionId}`;
+}
+
+function promptHistoryKey(sessionId: string): string {
+  return `${PROMPT_HISTORY_KEY_PREFIX}${sessionId}`;
+}
+
+function loadHistory(sessionId: string): ChatLine[] | null {
+  try {
+    const raw = localStorage.getItem(historyKey(sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const valid = parsed.filter(
+      (x) => x && typeof x.id === "string" && (x.role === "user" || x.role === "assistant") && typeof x.content === "string",
+    ) as ChatLine[];
+    return valid.length > 0 ? valid : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadPending(
+  sessionId: string,
+): {
+  sessionId: string;
+  details?: Record<string, unknown> | null;
+} | null {
+  try {
+    const raw = localStorage.getItem(pendingKey(sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { sessionId?: string; details?: Record<string, unknown> | null };
+    if (parsed?.sessionId !== sessionId) return null;
+    return { sessionId: parsed.sessionId, details: parsed.details || null };
+  } catch {
+    return null;
+  }
+}
+
+function loadPromptHistory(sessionId: string): string[] {
+  try {
+    const raw = localStorage.getItem(promptHistoryKey(sessionId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x) => typeof x === "string" && x.trim().length > 0);
+  } catch {
+    return [];
+  }
 }
 
 function parseApprovalIntent(text: string): boolean | null {
@@ -240,6 +343,17 @@ function pickActiveAgentFromTrace(
   return "planner";
 }
 
+function inferAgentFromPrompt(message: string): string | null {
+  const m = (message || "").toLowerCase();
+  if (!m) return null;
+  if (m.includes("research") || m.includes("web") || m.includes("search") || m.includes("paper") || m.includes("source")) {
+    return "research-agent";
+  }
+  if (m.includes("stock") || m.includes("inventory") || m.includes("restock")) return "inventory-agent";
+  if (m.includes("database") || m.includes("sql") || m.includes("project") || m.includes("update")) return "database-agent";
+  return null;
+}
+
 function runDemoAgents(message: string): ChatLine[] {
   const m = message.toLowerCase();
   const lines: ChatLine[] = [];
@@ -288,16 +402,11 @@ function runDemoAgents(message: string): ChatLine[] {
 }
 
 export default function Assistant() {
-  const [lines, setLines] = useState<ChatLine[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      agent: "Planner",
-      content:
-        "Hi! I'm the Treedome Planner (demo). Ask about inventory, experiments, or research workflows. Live mode uses OpenRouter; database reads go through **AI oversight** for human approval.",
-    },
-  ]);
+  const [lines, setLines] = useState<ChatLine[]>([]);
   const [input, setInput] = useState("");
+  const [promptHistory, setPromptHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  const [historyDraft, setHistoryDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => getOrCreateSessionId());
@@ -308,6 +417,33 @@ export default function Assistant() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const scrollDown = () => bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+
+  React.useEffect(() => {
+    const restored = loadHistory(sessionId);
+    setLines(restored || [makeWelcomeLine()]);
+    setPendingApproval(loadPending(sessionId));
+    setPromptHistory(loadPromptHistory(sessionId));
+    setHistoryIndex(-1);
+    setHistoryDraft("");
+    setTimeout(scrollDown, 50);
+  }, [sessionId]);
+
+  React.useEffect(() => {
+    if (lines.length === 0) return;
+    localStorage.setItem(historyKey(sessionId), JSON.stringify(lines));
+  }, [sessionId, lines]);
+
+  React.useEffect(() => {
+    if (!pendingApproval) {
+      localStorage.removeItem(pendingKey(sessionId));
+      return;
+    }
+    localStorage.setItem(pendingKey(sessionId), JSON.stringify(pendingApproval));
+  }, [sessionId, pendingApproval]);
+
+  React.useEffect(() => {
+    localStorage.setItem(promptHistoryKey(sessionId), JSON.stringify(promptHistory));
+  }, [sessionId, promptHistory]);
 
   const append = useCallback((chunk: ChatLine[]) => {
     setLines((prev) => [...prev, ...chunk]);
@@ -347,7 +483,6 @@ export default function Assistant() {
     const traceId = `${Date.now()}-trace`;
     let buffer = "";
     let eventCount = 0;
-    const stepLines: string[] = [];
     const startedAt = Date.now();
     let lastEventAt = Date.now();
 
@@ -367,8 +502,7 @@ export default function Assistant() {
         agent: "stream",
         content:
           `Streaming agent progress (${eventCount} updates)...\n` +
-          `Waiting for next update (${idleSec}s idle, ${totalSec}s total)...\n\n` +
-          stepLines.join("\n"),
+          `Waiting for next update (${idleSec}s idle, ${totalSec}s total)...`,
       }));
     }, 1500);
     while (true) {
@@ -384,30 +518,21 @@ export default function Assistant() {
           const raw = line.slice(6).trim();
           if (raw === "[DONE]") continue;
           try {
-            const parsed = JSON.parse(raw) as { update?: unknown };
+            JSON.parse(raw);
             eventCount += 1;
-            const updates = summarizeUpdate(parsed.update);
-            if (updates.length === 0) {
-              stepLines.push(`• Update #${eventCount} received`);
-            } else {
-              for (const entry of updates) {
-                stepLines.push(`• ${entry}`);
-              }
-            }
             upsertLine(traceId, () => ({
               id: traceId,
               role: "assistant",
               agent: "stream",
-              content: `Streaming agent progress (${eventCount} updates)...\n\n${stepLines.join("\n")}`,
+              content: `Streaming agent progress (${eventCount} updates)...`,
             }));
           } catch {
             eventCount += 1;
-            stepLines.push(`• ${raw.slice(0, 220)}`);
             upsertLine(traceId, () => ({
               id: traceId,
               role: "assistant",
               agent: "stream",
-              content: `Streaming agent progress (${eventCount} updates)...\n\n${stepLines.join("\n")}`,
+              content: `Streaming agent progress (${eventCount} updates)...`,
             }));
           }
         }
@@ -420,10 +545,9 @@ export default function Assistant() {
       id: traceId,
       role: "assistant",
       agent: "stream",
-      content:
-        (stepLines.length > 0
-          ? `Completed (${eventCount} updates).\n\n${stepLines.join("\n")}`
-          : "Completed: no stream updates were emitted."),
+      content: eventCount > 0
+        ? `Completed (${eventCount} updates). Detailed monitoring is available in AI Oversight.`
+        : "Completed. Detailed monitoring is available in AI Oversight.",
     }));
   };
 
@@ -453,11 +577,19 @@ export default function Assistant() {
     });
     setSessionId(data.session_id);
     localStorage.setItem(SESSION_KEY, data.session_id);
+    const traceAgent = pickActiveAgentFromTrace(data.orchestration_trace);
+    const fallbackAgent = inferAgentFromPrompt(message);
+    const displayAgent =
+      data.pending_approval
+        ? "database-agent"
+        : traceAgent === "ai" && fallbackAgent
+          ? fallbackAgent
+          : traceAgent;
     append([
       {
         id: `${Date.now()}-a`,
         role: "assistant",
-        agent: data.pending_approval ? "database-agent" : pickActiveAgentFromTrace(data.orchestration_trace),
+        agent: displayAgent,
         orchestratedBy: "planner",
         content: data.response || "No response",
       },
@@ -505,8 +637,18 @@ export default function Assistant() {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
+    setHistoryIndex(-1);
+    setHistoryDraft("");
     setError(null);
     setBusy(true);
+    setPromptHistory((prev) => {
+      const next = [...prev];
+      if (next[next.length - 1] !== text) next.push(text);
+      if (next.length > PROMPT_HISTORY_LIMIT) {
+        return next.slice(next.length - PROMPT_HISTORY_LIMIT);
+      }
+      return next;
+    });
     append([{ id: `${Date.now()}-u`, role: "user", content: text }]);
     try {
       // Cursor-like UX: if approval is pending, short yes/no replies trigger approve/reject.
@@ -536,14 +678,9 @@ export default function Assistant() {
     localStorage.setItem(SESSION_KEY, next);
     setSessionId(next);
     setError(null);
+    setPendingApproval(null);
     setLines([
-      {
-        id: "welcome",
-        role: "assistant",
-        agent: "Planner",
-        content:
-          "New chat session started. Old conversations are saved in AI Oversight usage logs and grouped by session.",
-      },
+      makeWelcomeLine("New chat session started. Old conversations are saved in AI Oversight usage logs and grouped by session."),
     ]);
   };
 
@@ -649,13 +786,57 @@ export default function Assistant() {
         </div>
 
         <div className="border-t border-white/50 p-3 dark:border-white/10 sm:p-4">
+          <div className="mb-2 flex flex-wrap gap-2">
+            {SUGGESTED_PROMPTS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="chip !px-3 !py-1.5 text-xs font-bold uppercase tracking-wider bg-white/80 text-ocean-800 hover:bg-white dark:bg-white/10 dark:text-ocean-100"
+                onClick={() => setInput(p.text)}
+                disabled={busy}
+                title={p.label}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
               className="input flex-1"
               placeholder="Ask: “Any low stock?” or “Summarize project status in SQL terms”…"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                if (historyIndex !== -1) setHistoryIndex(-1);
+              }}
               onKeyDown={(e) => {
+                if (e.key === "ArrowUp") {
+                  if (promptHistory.length === 0) return;
+                  e.preventDefault();
+                  if (historyIndex === -1) {
+                    setHistoryDraft(input);
+                    const nextIndex = promptHistory.length - 1;
+                    setHistoryIndex(nextIndex);
+                    setInput(promptHistory[nextIndex] || "");
+                    return;
+                  }
+                  const nextIndex = Math.max(0, historyIndex - 1);
+                  setHistoryIndex(nextIndex);
+                  setInput(promptHistory[nextIndex] || "");
+                  return;
+                }
+                if (e.key === "ArrowDown" && historyIndex !== -1) {
+                  e.preventDefault();
+                  if (historyIndex >= promptHistory.length - 1) {
+                    setHistoryIndex(-1);
+                    setInput(historyDraft);
+                    return;
+                  }
+                  const nextIndex = historyIndex + 1;
+                  setHistoryIndex(nextIndex);
+                  setInput(promptHistory[nextIndex] || "");
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   void onSend();

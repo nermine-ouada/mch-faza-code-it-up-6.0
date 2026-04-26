@@ -13,6 +13,7 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 type CalendarEvent = {
   id: number | string;
   date: string;
+  endDate?: string;
   title: string;
   time?: string;
   owner?: string;
@@ -47,13 +48,30 @@ export default function CalendarView({ events }: { events: CalendarEvent[] }) {
 
   const eventsByDay = useMemo(() => {
     const m = new Map<number, CalendarEvent[]>();
-    for (const e of events) {
-      const dt = new Date(e.date);
-      if (Number.isNaN(dt.getTime())) continue;
-      if (dt.getMonth() !== cursor.month || dt.getFullYear() !== cursor.year) continue;
-      const day = dt.getDate();
+    const pushForDay = (day: number, ev: CalendarEvent) => {
       if (!m.has(day)) m.set(day, []);
-      m.get(day)?.push(e);
+      m.get(day)?.push(ev);
+    };
+    for (const e of events) {
+      const start = new Date(e.date);
+      if (Number.isNaN(start.getTime())) continue;
+      const end = e.endDate ? new Date(e.endDate) : new Date(e.date);
+      if (Number.isNaN(end.getTime())) continue;
+      const startNorm = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      const endNorm = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+      const from = startNorm <= endNorm ? startNorm : endNorm;
+      const to = startNorm <= endNorm ? endNorm : startNorm;
+
+      // Expand multi-day items across each day (bounded for safety).
+      const d = new Date(from);
+      let guard = 0;
+      while (d <= to && guard < 400) {
+        if (d.getMonth() === cursor.month && d.getFullYear() === cursor.year) {
+          pushForDay(d.getDate(), e);
+        }
+        d.setDate(d.getDate() + 1);
+        guard += 1;
+      }
     }
     return m;
   }, [events, cursor.month, cursor.year]);

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import { apiFetch, apiJson } from "../lib/api";
+import { nextDemoInventory } from "../lib/demoData";
 
 type Row = {
   id: number;
@@ -52,8 +53,16 @@ export default function Inventory() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: "", category: "", quantity: 0, unit: "", min_required: 0 });
+    setForm(nextDemoInventory());
     setModal("create");
+  };
+
+  const fillDemo = () => {
+    setForm(nextDemoInventory());
+  };
+
+  const clearForm = () => {
+    setForm({ name: "", category: "", quantity: 0, unit: "", min_required: 0 });
   };
 
   const openEdit = (r: Row) => {
@@ -133,7 +142,10 @@ export default function Inventory() {
   };
 
   const remove = async (r: Row) => {
-    if (!window.confirm(`Delete “${r.name}”?`)) return;
+    const ok = window.confirm(
+      `Delete “${r.name}”?\n\nQuantity: ${r.quantity} ${r.unit || ""}\n\nThis will permanently remove the item and its transaction history. This action cannot be undone.`,
+    );
+    if (!ok) return;
     setBusy(true);
     try {
       const res = await apiFetch(`/api/inventory/${r.id}`, { method: "DELETE" });
@@ -273,9 +285,28 @@ export default function Inventory() {
               </>
             ) : (
               <>
-                <h3 className="font-heading text-xl text-ocean-900 dark:text-sand-100">
-                  {modal === "edit" ? "Edit item" : "New item"}
-                </h3>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-heading text-xl text-ocean-900 dark:text-sand-100">
+                      {modal === "edit" ? "Edit item" : "New item"}
+                    </h3>
+                    {modal === "create" && (
+                      <p className="mt-1 text-xs font-semibold text-ocean-600 dark:text-ocean-200/70">
+                        Pre-filled with demo data — Save to test, or edit fields first.
+                      </p>
+                    )}
+                  </div>
+                  {modal === "create" && (
+                    <div className="flex flex-none gap-2">
+                      <button type="button" className="btn-ghost !px-2 !py-1 !text-xs" onClick={fillDemo}>
+                        Re-fill demo
+                      </button>
+                      <button type="button" className="btn-ghost !px-2 !py-1 !text-xs" onClick={clearForm}>
+                        Clear
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="block text-xs font-bold uppercase tracking-widest text-ocean-700 dark:text-ocean-200/80 sm:col-span-2">
                     Name

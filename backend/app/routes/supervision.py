@@ -67,7 +67,14 @@ async def approve_sql_proposal(
     if prop.status != "pending":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Proposal is not pending")
 
-    result_text, err = await run_in_threadpool(_execute_select_sync, prop.sql_text)
+    # Re-validate and persist normalized SQL so previously stored proposals
+    # with MySQL-ish syntax or hallucinated aliases can still be approved safely.
+    v_err, cleaned = validate_read_only_select(prop.sql_text)
+    if v_err or cleaned is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, v_err or "Invalid SQL proposal")
+    prop.sql_text = cleaned
+
+    result_text, err = await run_in_threadpool(_execute_select_sync, cleaned)
     now = datetime.utcnow()
     if err:
         prop.error_text = err
